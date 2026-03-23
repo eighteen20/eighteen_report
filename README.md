@@ -128,6 +128,44 @@
 - `GET /api/datasource/list`：数据源列表
 - `POST /api/datasource/test`：测试数据集连接
 
+### 5.1 首次运行可用的内置演示接口（`DemoUserController`）
+
+为了帮助第一次启动项目时快速验证后端联通性、动态水印和图片回调流程，项目内置了演示接口：
+
+- 控制器位置：`eighteen_report/src/main/java/cn/com/_1820/eighteen_report/controller/DemoUserController.java`
+- 接口基础路径：`/api/demo/user`
+
+1. **分页查询演示用户**
+   - `GET /api/demo/user/list?page=0&size=10`
+   - 用途：作为报表数据集测试接口，验证基础查询与分页。
+   - 示例：
+     - 浏览器直接访问：`http://localhost:9876/api/demo/user/list?page=0&size=10`
+
+2. **动态水印测试**
+   - `GET /api/demo/user/watermark`
+   - 用途：用于联调“动态水印回调”，返回带时间戳的水印文案。
+   - 示例：
+     - 浏览器直接访问：`http://localhost:9876/api/demo/user/watermark`
+   - 返回示例：
+     - `900821用户: 1711111111111`
+
+3. **模拟业务方图片上传回调（本地联调）**
+   - `POST /api/demo/user/image/upload`
+   - `Content-Type: multipart/form-data`
+   - 表单参数：`imgFile`（必须与报表工具约定一致）
+   - 用途：模拟业务系统接收图片并返回可访问 URL，供报表工具将 URL 写回单元格。
+   - 在报表设计器中配置：
+     - 「报表设置 → 图片上传回调地址」填写 `http://localhost:9876/api/demo/user/image/upload`
+   - `curl` 示例：
+     - `curl -X POST "http://localhost:9876/api/demo/user/image/upload" -F "imgFile=@/绝对路径/测试图片.png"`
+   - 返回示例：
+     - `{"url":"http://localhost:9876/temp/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.png"}`
+
+> 说明：
+> - 该接口会把上传文件保存到工作区根目录的 `temp/` 目录；
+> - 返回 URL 依赖后端的 `/temp/**` 静态资源映射（项目已包含相关配置）；
+> - 以上接口主要用于本地联调与首次体验，生产环境建议替换为真实业务接口。
+
 ### 6. 报表模板 `content` 结构（关键）
 
 模板的 `content` 保存为 JSON 字符串，核心字段包括：
