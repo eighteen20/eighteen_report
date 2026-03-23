@@ -1,0 +1,54 @@
+/*
+ * Eighteen Report 报表工具 - Gradle 构建脚本
+ *
+ * 技术栈：
+ *   - Java 25 + Spring Boot 4.0
+ *   - Spring Data JPA + MySQL
+ *   - EasyExcel（报表导出）
+ *   - Lombok（简化 Java 代码）
+ *
+ * 前端：Vue 3 + Vite + TypeScript（编译产物输出到 src/main/resources/static）
+ * 部署：前后端不分离，Vue 构建产物由 Spring Boot 静态资源服务直接托管
+ */
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.0.3'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'cn.com._1820'
+version = '0.0.1-SNAPSHOT'
+description = 'eighteen_report'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // freemarker 已移除：前端改为 Vue 3 SPA，不再使用服务端模板渲染
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'com.alibaba:easyexcel:4.0.3'
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    runtimeOnly 'com.mysql:mysql-connector-j'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

@@ -1,0 +1,11 @@
+.git
+.gitignore
+.idea
+.gradle
+out
+*.iml
+
+# docs / local artifacts
+agent-transcripts
+mcps
+terminals

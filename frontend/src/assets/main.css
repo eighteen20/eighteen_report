@@ -1,0 +1,195 @@
+/**
+ * 全局样式入口
+ *
+ * 引入 TailwindCSS 基础样式，并定义项目级全局 CSS 变量和覆盖规则。
+ * TailwindCSS v4 使用 @import 语法直接引入，不需要 tailwind.config.ts 文件。
+ */
+@import "tailwindcss";
+
+/* =========================================================
+ * CSS 设计变量（Design Tokens）
+ * 统一管理主色、背景色、边框色等，便于全局一致性维护。
+ * ========================================================= */
+:root {
+  /* 主色系 */
+  --color-primary: #1677ff;
+  --color-primary-hover: #4096ff;
+  --color-primary-active: #0958d9;
+
+  /* 危险/错误色 */
+  --color-danger: #ff4d4f;
+  --color-danger-hover: #ff7875;
+
+  /* 成功色 */
+  --color-success: #52c41a;
+
+  /* 文本色阶 */
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+
+  /* 背景色阶 */
+  --color-bg-base: #f5f6fa;
+  --color-bg-white: #ffffff;
+  --color-bg-hover: #f9fafb;
+
+  /* 边框 */
+  --color-border: #e5e7eb;
+  --color-border-light: #f0f0f0;
+
+  /* 工具栏高度 */
+  --toolbar-height: 44px;
+  --format-toolbar-height: 36px;
+
+  /* 左侧面板宽度 */
+  --left-panel-width: 220px;
+
+  /* 右侧面板宽度 */
+  --right-panel-width: 260px;
+}
+
+/* =========================================================
+ * 全局基础样式重置
+ * ========================================================= */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* =========================================================
+ * AG Grid 样式覆盖
+ * 以下规则用于在设计器中实现 Excel 风格的选区高亮和冻结行视觉。
+ * ========================================================= */
+.ag-theme-alpine {
+  --ag-background-color: #fff;
+  --ag-header-background-color: #fafafa;
+  --ag-odd-row-background-color: #fff;
+  --ag-row-hover-color: #f5f9ff;
+  --ag-selected-row-background-color: transparent;
+  --ag-range-selection-background-color: rgba(22, 119, 255, 0.1);
+  --ag-range-selection-border-color: #1677ff;
+}
+
+/* 选中单元格高亮（设计器模式） */
+.ag-cell.cell-selected {
+  background-color: rgba(22, 119, 255, 0.12) !important;
+}
+
+/* 变量表达式单元格：蓝色斜体 */
+.ag-cell.ag-cell-var {
+  color: #1677ff;
+  font-style: italic;
+}
+
+/* 冻结行视觉分隔线 */
+.ag-row.row-frozen-boundary .ag-cell {
+  border-bottom: 2px solid #1677ff !important;
+}
+
+/* 冻结行蓝色背景 */
+.ag-cell.cell-frozen-row {
+  background-color: rgba(22, 119, 255, 0.06) !important;
+}
+
+/* =========================================================
+ * 网格线开关（设计器报表设置：gridMeta.showGridLines）
+ *
+ * 关键点：
+ * - 不再用 `border-*-color: ... !important` 去“硬改每个 cell 的边框色”，否则会覆盖单元格自定义边框颜色，
+ *   导致最右/最下外框等边界线在视觉上变浅甚至“看不见”。
+ * - 改为通过 AG Grid 主题变量控制“默认网格线”的颜色（影响 theme 生成的网格线），
+ *   同时不干扰我们通过 inline style 设置的单元格边框。
+ * ========================================================= */
+.ag-theme-alpine.er-grid-lines {
+  --ag-border-color: #e5e7eb;
+  --ag-secondary-border-color: #e5e7eb;
+}
+
+.ag-theme-alpine.er-grid-no-lines {
+  --ag-border-color: transparent;
+  --ag-secondary-border-color: transparent;
+}
+
+/* 预览页：隐藏列头（A/B/C…）时去掉 header 占位 */
+.er-preview-no-col-header .ag-header {
+  display: none !important;
+}
+
+/* 预览页：有冻结行时使用 normal 布局，网格需占满容器高度才能显示 body */
+.er-preview-grid-with-pinned.ag-theme-alpine {
+  height: 100%;
+}
+
+/**
+ * 预览只读：页边留白格（er-preview-margin-gutter）
+ * 禁用指针事件，避免点击出现选区/焦点框；内容区仍可正常交互（若需复制可后续再细化）。
+ */
+.er-preview-readonly .er-preview-margin-gutter.ag-cell {
+  pointer-events: none !important;
+  user-select: none;
+  cursor: default !important;
+}
+
+.er-preview-readonly .er-preview-margin-gutter.ag-cell-focus {
+  border-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/**
+ * 设计器页边留白单元格：
+ * - 背景用斜线纹理提示“不可写入的留白区”
+ * - 实际“不能写入”在 {@code ReportGrid.vue} 的 editable 回调里控制
+ */
+.er-design-edge-gutter.ag-cell {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(0, 0, 0, 0.06) 0px,
+    rgba(0, 0, 0, 0.06) 4px,
+    rgba(255, 255, 255, 0) 4px,
+    rgba(255, 255, 255, 0) 10px
+  ) !important;
+  background-color: rgba(0, 0, 0, 0.015) !important;
+}
+
+/* 选中留白格时仍保留斜线纹理，避免被全局 cell-selected 覆盖掉纹理 */
+.er-design-edge-gutter.ag-cell.cell-selected {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(0, 0, 0, 0.08) 0px,
+    rgba(0, 0, 0, 0.08) 4px,
+    rgba(255, 255, 255, 0) 4px,
+    rgba(255, 255, 255, 0) 10px
+  ) !important;
+}
+
+/* =========================================================
+ * 通用过渡动画
+ * ========================================================= */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}

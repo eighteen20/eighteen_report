@@ -1,0 +1,50 @@
+# ============================
+# Eighteen Report 报表工具配置
+# ============================
+
+server:
+  port: 9876                    # 应用端口
+
+# 动态水印：服务端回调业务地址（模板 gridMeta.watermarkCallbackUrl）时的超时、白名单与 SSRF 相关约束
+eighteen:
+  report:
+    watermark-callback:
+      enabled: true               # false 时忽略模板中的回调 URL（应急开关）
+      connect-timeout-ms: 3000
+      read-timeout-ms: 8000
+      max-response-body-chars: 512
+      # 生产环境建议配置 host 白名单，例如：api.corp.example.com、*.corp.example.com
+      allowed-host-patterns: []
+      # true 时拒绝解析为回环/站点本地等地址的请求（内网回调需关闭或改用白名单）
+      deny-private-hosts: false
+
+spring:
+  application:
+    name: eighteen_report       # 应用名称
+  servlet:
+    multipart:
+      max-file-size: 20MB       # 单个文件上传大小上限（图片中转用）
+      max-request-size: 22MB    # 单次请求总大小上限（略大于 max-file-size）
+  datasource:
+    url: jdbc:mysql://localhost:3306/eighteen_report?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
+    username: root               # 数据库用户名
+    password: root               # 数据库密码
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update           # 自动更新表结构（开发环境）
+    show-sql: false              # 是否打印 SQL
+    properties:
+      hibernate:
+        format_sql: true         # 格式化 SQL 输出
+        dialect: org.hibernate.dialect.MySQLDialect
+    open-in-view: false          # 关闭 OSIV，避免懒加载问题
+  web:
+    resources:
+      # 静态资源缓存配置（Vue 构建产物文件名含 hash，可长期缓存）
+      # index.html 本身不在此缓存策略内（浏览器默认不缓存根 HTML）
+      cache:
+        period: 31536000                         # 缓存 1 年（秒），适用于有 hash 的 JS/CSS 文件
+        cachecontrol:
+          max-age: 31536000                      # Cache-Control: max-age=31536000
+          no-cache: false
