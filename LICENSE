@@ -1,0 +1,13 @@
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+This project is licensed under the GNU Affero General Public License
+version 3 (or any later version).
+
+You may obtain a copy of the License at:
+https://www.gnu.org/licenses/agpl-3.0.txt
+
+--- 许可简述（中文） ---
+1. 你可以免费使用本项目（个人与商业场景均不收取使用费）。
+2. 如果你对本项目进行二次开发，并将修改后的版本以“通过网络向他人提供服务”的方式对外使用（例如部署到公网并让他人访问），你需要向使用者提供你的“对应源代码（Corresponding Source）”，并按 AGPL-3.0-or-later 的条款继续开源许可。
+3. 更完整的法律条款以上述 AGPL-3.0 文本为准。
+
