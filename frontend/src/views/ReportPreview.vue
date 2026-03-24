@@ -26,6 +26,8 @@ import { BaseButton } from '@/components/base'
 import { COL_LETTERS } from '@/stores'
 import type { MergeRegion, CellStyle } from '@/types'
 import { messager } from '@/composables/useMessager'
+import QRCode from 'qrcode'
+import bwipjs from 'bwip-js'
 
 // 注册 AG Grid 社区版所有模块
 ModuleRegistry.registerModules([AllCommunityModule])
@@ -130,6 +132,17 @@ const pinnedTopRowData = ref<Record<string, unknown>[]>([])
  * 用于预览时识别 image 类型单元格并渲染 <img>，而非显示 URL 字符串。
  */
 const cellTypesSnapshot = ref<(string | null)[][]>([])
+/**
+ * 模板原始单元格存在性矩阵（row x col -> 是否在模板 cells 中显式定义）。
+ * 用于区分“模板原始格子”和“渲染阶段展开出来的新格子”。
+ */
+const templateCellExistsSnapshot = ref<boolean[][]>([])
+/**
+ * 列类型兜底（按模板列推断）：
+ * 当渲染后的行号超出模板行号（如数据集展开新增行）导致拿不到精确 type 时，
+ * 若该列在模板中出现过 barcode/qrcode/image，则按列继承该类型继续渲染。
+ */
+const columnTypeFallback = ref<Record<number, 'image' | 'barcode' | 'qrcode'>>({})
 /** 冻结行数（用于 colSpan/rowSpan 中把 body 的 rowIndex 转为全局行号） */
 const freezeHeaderRowsRef = ref(0)
 /** 渲染使用的合并区域（传入列定义 colSpan/rowSpan 回调使用） */
@@ -209,6 +222,43 @@ function isLikelyImageUrl(value: string): boolean {
   if (v.startsWith('data:image/')) return true
   if (!/^https?:\/\//i.test(v)) return false
   return /\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(v)
+}
+
+/**
+ * 生成二维码 data URL（前端 qrcode 库）。
+ *
+ * @param text 二维码文本
+ * @returns data:image/png;base64,...
+ */
+async function buildQrcodeDataUrl(text: string): Promise<string> {
+  const canvas = document.createElement('canvas')
+  await QRCode.toCanvas(canvas, text, {
+    errorCorrectionLevel: 'M',
+    margin: 1,
+    width: 180,
+  })
+  return canvas.toDataURL('image/png')
+}
+
+/**
+ * 生成条形码 data URL（前端 bwip-js 库）。
+ *
+ * @param text 条形码文本
+ * @returns data:image/png;base64,...
+ */
+async function buildBarcodeDataUrl(text: string): Promise<string> {
+  const canvas = document.createElement('canvas')
+  // bwip-js 在浏览器侧渲染到 canvas
+  bwipjs.toCanvas(canvas, {
+    bcid: 'code128',
+    text,
+    scale: 2,
+    height: 12,
+    includetext: false,
+    paddingwidth: 2,
+    paddingheight: 2,
+  })
+  return canvas.toDataURL('image/png')
 }
 
 // ============================================================
@@ -315,18 +365,36 @@ onMounted(async () => {
         const typeMatrix: (string | null)[][] = Array.from({ length: tplRowCount }, () =>
           new Array<string | null>(tplColCount).fill(null),
         )
+        const existsMatrix: boolean[][] = Array.from({ length: tplRowCount }, () =>
+          new Array<boolean>(tplColCount).fill(false),
+        )
         // 解析 "A1", "B2"... cellRef 并填充类型
         for (const [ref, data] of Object.entries(tplCells)) {
-          if (!data?.type || data.type === 'text') continue
           // 解析列字母与行号（简单解析，仅支持单字母和双字母列）
           const match = ref.match(/^([A-Z]+)(\d+)$/)
           if (!match) continue
           const colLetterIdx = COL_LETTERS.indexOf(match[1])
           const rowIdx = parseInt(match[2], 10) - 1
           if (colLetterIdx < 0 || rowIdx < 0 || rowIdx >= tplRowCount || colLetterIdx >= tplColCount) continue
-          typeMatrix[rowIdx][colLetterIdx] = data.type
+          existsMatrix[rowIdx][colLetterIdx] = true
+          if (data?.type && data.type !== 'text') {
+            typeMatrix[rowIdx][colLetterIdx] = data.type
+          }
         }
         cellTypesSnapshot.value = typeMatrix
+        templateCellExistsSnapshot.value = existsMatrix
+        // 构建列级类型兜底映射（仅保留预览需要的三类）
+        const colTypeMap: Record<number, 'image' | 'barcode' | 'qrcode'> = {}
+        for (const row of typeMatrix) {
+          for (let c = 0; c < row.length; c++) {
+            const t = row[c]
+            if (t === 'image' || t === 'barcode' || t === 'qrcode') {
+              // 同列若存在多种类型，优先保留先出现的（通常模板同列语义固定）
+              if (!colTypeMap[c]) colTypeMap[c] = t
+            }
+          }
+        }
+        columnTypeFallback.value = colTypeMap
       } catch (_) {
         // 忽略解析失败，继续使用默认文本渲染
       }
@@ -399,8 +467,12 @@ onMounted(async () => {
         cellRenderer: (params: CellClassParams) => {
           const ar = getActualRowIndex(params.node, freezeHeaderRowsRef.value)
           const typeMatrix = cellTypesSnapshot.value
-          const cellType =
+          const explicitType =
             typeMatrix && typeMatrix[ar] ? typeMatrix[ar][colIdx] : null
+          const existsMatrix = templateCellExistsSnapshot.value
+          // 仅对“模板未显式定义”的位置（通常是数据展开新增行）启用列级兜底
+          const isTemplateOriginCell = !!(existsMatrix && existsMatrix[ar] && existsMatrix[ar][colIdx])
+          const cellType = explicitType || (!isTemplateOriginCell ? columnTypeFallback.value[colIdx] : null) || null
           const val = params.value as string | null | undefined
           const shouldRenderImage = !!val && (cellType === 'image' || isLikelyImageUrl(val))
           if (shouldRenderImage) {
@@ -421,6 +493,30 @@ onMounted(async () => {
               wrapper.textContent = '[图片加载失败]'
             }
             wrapper.appendChild(img)
+            return wrapper
+          }
+          // 条形码/二维码：仅在预览渲染，不在设计器渲染
+          if (!!val && (cellType === 'barcode' || cellType === 'qrcode')) {
+            const wrapper = document.createElement('div')
+            wrapper.style.cssText =
+              'display:flex;align-items:center;justify-content:center;width:100%;height:100%;overflow:hidden;'
+            const img = document.createElement('img')
+            img.alt = cellType === 'barcode' ? '条形码' : '二维码'
+            img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;'
+            wrapper.appendChild(img)
+
+            const render = cellType === 'barcode' ? buildBarcodeDataUrl : buildQrcodeDataUrl
+            void render(val).then((dataUrl) => {
+              img.src = dataUrl
+              // 双击码图同样支持大图预览
+              img.ondblclick = (evt: MouseEvent) => {
+                evt.preventDefault()
+                evt.stopPropagation()
+                openImagePreview(dataUrl)
+              }
+            }).catch(() => {
+              wrapper.textContent = cellType === 'barcode' ? '[条形码渲染失败]' : '[二维码渲染失败]'
+            })
             return wrapper
           }
           return val ?? ''
