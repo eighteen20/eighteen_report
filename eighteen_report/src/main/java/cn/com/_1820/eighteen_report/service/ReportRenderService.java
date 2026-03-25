@@ -15,7 +15,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 报表渲染核心服务：解析模板单元格定义，执行数据集查询，进行 ${dsKey.field} 变量替换，将包含变量的行按数据集行数展开为多行，同时传播单元格样式和调整合并区域的行索引。
+ * 报表渲染核心服务：解析模板单元格定义，执行数据集查询，进行 ${dsKey.field} 变量替换，将包含变量的行按数据集行数展开为多行，
+ * 同时传播单元格样式、为每个输出行生成与模板行一致的行高（rowHeightsPx），并调整合并区域的行索引。
  */
 @Slf4j
 @Service
@@ -49,6 +50,8 @@ public class ReportRenderService {
                 Map.of("rowCount", 50, "colCount", 10));
         int rowCount = ((Number) gridMeta.getOrDefault("rowCount", 50)).intValue();
         int colCount = ((Number) gridMeta.getOrDefault("colCount", 10)).intValue();
+        Map<Integer, Integer> templateRowHeightsPx = parseTemplateRowHeightsFromGridMeta(gridMeta);
+        int defaultRowHeightPx = parseDefaultRowHeightPx(gridMeta);
 
         Map<String, Map<String, Object>> cells = (Map<String, Map<String, Object>>) content.getOrDefault("cells", Map.of());
 
@@ -99,12 +102,15 @@ public class ReportRenderService {
         // Build output rows with row-index tracking for merge adjustment
         List<List<String>> outputRows = new ArrayList<>();
         List<List<Map<String, String>>> outputStyles = new ArrayList<>();
+        /** 与 outputRows 一一对应：该输出行对应的模板行在设计器中配置的行高（px） */
+        List<Integer> outputRowHeightsPx = new ArrayList<>();
         int[] outRowStart = new int[rowCount];
         int[] outRowExpand = new int[rowCount];
         Arrays.fill(outRowStart, -1);
 
         for (int r = 0; r < rowCount; r++) {
             int before = outputRows.size();
+            int rowHeightThisTemplate = templateRowHeightsPx.getOrDefault(r, defaultRowHeightPx);
 
             if (isDataRow[r]) {
                 String dsKey = dataRowDsKey[r];
@@ -127,6 +133,7 @@ public class ReportRenderService {
                         }
                         outputRows.add(outRow);
                         outputStyles.add(outStyle);
+                        outputRowHeightsPx.add(rowHeightThisTemplate);
                         dataIdx++;
                     }
                 }
@@ -142,6 +149,7 @@ public class ReportRenderService {
                 }
                 outputRows.add(outRow);
                 outputStyles.add(outStyle);
+                outputRowHeightsPx.add(rowHeightThisTemplate);
             }
 
             int added = outputRows.size() - before;
@@ -157,6 +165,9 @@ public class ReportRenderService {
             if (last.stream().allMatch(s -> s == null || s.isEmpty())) {
                 outputRows.removeLast();
                 outputStyles.removeLast();
+                if (!outputRowHeightsPx.isEmpty()) {
+                    outputRowHeightsPx.removeLast();
+                }
             } else {
                 break;
             }
@@ -220,8 +231,54 @@ public class ReportRenderService {
                 .merges(outputMerges)
                 .rowCount(outputRows.size())
                 .colCount(finalColCount)
+                .rowHeightsPx(outputRowHeightsPx)
                 .watermark(dynamicWatermark)
                 .build();
+    }
+
+    /**
+     * 解析 gridMeta.rowHeights：键可为字符串或数字（JSON 兼容），值为像素高度。
+     */
+    private Map<Integer, Integer> parseTemplateRowHeightsFromGridMeta(Map<String, Object> gridMeta) {
+        Map<Integer, Integer> map = new LinkedHashMap<>();
+        if (gridMeta == null) {
+            return map;
+        }
+        Object rhObj = gridMeta.get("rowHeights");
+        if (!(rhObj instanceof Map<?, ?> rh)) {
+            return map;
+        }
+        for (Map.Entry<?, ?> e : rh.entrySet()) {
+            if (!(e.getValue() instanceof Number heightNum)) {
+                continue;
+            }
+            int rowIndex = -1;
+            Object k = e.getKey();
+            if (k instanceof Number kn) {
+                rowIndex = kn.intValue();
+            } else if (k != null) {
+                try {
+                    rowIndex = Integer.parseInt(k.toString().trim());
+                } catch (NumberFormatException ignored) {
+                    continue;
+                }
+            }
+            if (rowIndex >= 0) {
+                map.put(rowIndex, Math.max(1, heightNum.intValue()));
+            }
+        }
+        return map;
+    }
+
+    private int parseDefaultRowHeightPx(Map<String, Object> gridMeta) {
+        if (gridMeta == null) {
+            return 25;
+        }
+        Object o = gridMeta.get("defaultRowHeight");
+        if (o instanceof Number n && n.intValue() > 0) {
+            return n.intValue();
+        }
+        return 25;
     }
 
     /**

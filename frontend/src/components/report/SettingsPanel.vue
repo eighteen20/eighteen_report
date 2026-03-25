@@ -109,7 +109,27 @@ const cellType = computed({
     if (!anchorRef.value) return
     const c = designerStore.ensureCell(anchorRef.value)
     c.type = v as 'text' | 'number' | 'image' | 'barcode' | 'qrcode'
+    if (v !== 'image') delete c.embedImageInCell
     designerStore.cleanCell(anchorRef.value)
+  },
+})
+
+/**
+ * 图片单元格导出 Excel 时的锚点方式：嵌入（随单元格缩放）或否。
+ * 未写入 JSON 时由后端按 true 处理。
+ */
+const embedImageInCell = computed({
+  get: () => {
+    if (!anchorRef.value) return true
+    const c = designerStore.cells[anchorRef.value]
+    return c?.embedImageInCell !== false
+  },
+  set: (checked: boolean) => {
+    if (!anchorRef.value) return
+    const c = designerStore.ensureCell(anchorRef.value)
+    if (checked) delete c.embedImageInCell
+    else c.embedImageInCell = false
+    emit('refreshCells')
   },
 })
 
@@ -413,6 +433,15 @@ function saveWatermarkSettings() {
               <option value="barcode">条形码</option>
               <option value="qrcode">二维码</option>
             </BaseSelect>
+          </div>
+
+          <!-- 导出 Excel：图片嵌入单元格（条形码/二维码仍始终随单元格缩放） -->
+          <div v-if="cellType === 'image'" class="sp-row items-start">
+            <span class="sp-label pt-0.5">导出 Excel</span>
+            <label class="flex items-start gap-2 cursor-pointer text-[12px] text-gray-700">
+              <input v-model="embedImageInCell" type="checkbox" class="mt-0.5 rounded border-gray-300" />
+              <span>图片随单元格移动并缩放（取消则移动但不随单元格缩放）</span>
+            </label>
           </div>
         </template>
       </template>

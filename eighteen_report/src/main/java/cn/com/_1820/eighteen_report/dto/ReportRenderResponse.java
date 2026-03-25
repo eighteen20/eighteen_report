@@ -28,6 +28,11 @@ public class ReportRenderResponse {
     /** 输出总列数 */
     private int colCount;
     /**
+     * 与 {@link #cells} 每一输出行对应的行高（像素，与设计器 gridMeta 一致）。
+     * 数据模板行展开为多行时，每一行复用该模板行配置的高度。
+     */
+    private List<Integer> rowHeightsPx;
+    /**
      * 动态水印文本（可选）
      *
      * 前端预览页水印优先级：本字段优先于模板 content.gridMeta.watermark（固定文案）。

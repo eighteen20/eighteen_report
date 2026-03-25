@@ -20,7 +20,14 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { AgGridVue } from 'ag-grid-vue3'
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community'
-import type { ColDef, GridApi, ColSpanParams, RowSpanParams, CellClassParams } from 'ag-grid-community'
+import type {
+  ColDef,
+  GridApi,
+  ColSpanParams,
+  RowSpanParams,
+  CellClassParams,
+  RowHeightParams,
+} from 'ag-grid-community'
 import { renderReport, exportReport, getTemplate } from '@/api/report'
 import { BaseButton } from '@/components/base'
 import { COL_LETTERS } from '@/stores'
@@ -73,6 +80,10 @@ const previewEdgeMarginRightCol = ref(false)
 const previewSuppressHorizontalScroll = ref(true)
 /** 用于测量 body 视口宽度，见 {@link syncPreviewHorizontalScroll} */
 const previewGridHost = ref<HTMLElement | null>(null)
+/** 渲染结果中与每输出行对齐的行高（px），含数据集展开后的行 */
+const previewRowHeightsPx = ref<number[]>([])
+/** 无逐行高度时的回退，与模板 gridMeta.defaultRowHeight 一致 */
+const defaultPreviewRowHeightForGrid = ref(25)
 
 const watermarkText = computed(() => dynamicWatermark.value || fixedWatermark.value || '')
 
@@ -303,6 +314,7 @@ onMounted(async () => {
             freezeHeaderRows?: number
             colWidths?: Record<string, number>
             defaultColWidth?: number
+            defaultRowHeight?: number
             showPreviewColHeader?: boolean
             previewContentAlign?: 'left' | 'center' | 'right'
             watermark?: string
@@ -336,6 +348,9 @@ onMounted(async () => {
           if (typeof gm.defaultColWidth === 'number' && gm.defaultColWidth > 0) {
             defaultColWidthFromMeta = gm.defaultColWidth
           }
+          if (typeof gm.defaultRowHeight === 'number' && gm.defaultRowHeight > 0) {
+            defaultPreviewRowHeightForGrid.value = gm.defaultRowHeight
+          }
           showPreviewColHeader.value = !!gm.showPreviewColHeader
           previewContentAlign.value = gm.previewContentAlign || 'left'
           fixedWatermark.value = (gm.watermark || '').trim()
@@ -347,9 +362,10 @@ onMounted(async () => {
       }
     }
 
-    const { cells, styles, merges, colCount: backendColCount, watermark } = renderRes.data
+    const { cells, styles, merges, colCount: backendColCount, watermark, rowHeightsPx } = renderRes.data
     mergesSnapshot = merges || []
     dynamicWatermark.value = (watermark || '').trim()
+    previewRowHeightsPx.value = Array.isArray(rowHeightsPx) ? rowHeightsPx : []
 
     // 从模板 cells 构建类型矩阵（用于预览时识别 image 单元格）
     if (templateRes.data.content) {
@@ -601,6 +617,18 @@ function getActualRowIndex(
   return freezeHeaderRows + idx
 }
 
+/** 预览表行高：与渲染矩阵、冻结行拆分一致 */
+function previewGetRowHeight(params: RowHeightParams): number | undefined {
+  const ar = getActualRowIndex(params.node, freezeHeaderRowsRef.value)
+  const arr = previewRowHeightsPx.value
+  if (arr.length > 0 && ar >= 0 && ar < arr.length) {
+    const h = arr[ar]
+    if (h != null && h > 0) return h
+  }
+  const d = defaultPreviewRowHeightForGrid.value
+  return d > 0 ? d : undefined
+}
+
 /** 查找指定位置的合并区域（仅匹配左上角锚点） */
 function findMergeAt(merges: MergeRegion[], row: number, col: number): MergeRegion | null {
   return merges.find((m) => m.row === row && m.col === col) || null
@@ -710,9 +738,16 @@ function inferEffectiveColCount(
             :pinnedTopRowData="pinnedTopRowData"
             :defaultColDef="{ resizable: true, sortable: true }"
             :suppressRowTransform="true"
+            :getRowHeight="previewGetRowHeight"
             :suppressHorizontalScroll="previewSuppressHorizontalScroll"
             :headerHeight="showPreviewColHeader ? undefined : 0"
-            :domLayout="hasPinnedRows ? undefined : (rowData.length < 30 ? 'autoHeight' : undefined)"
+            :domLayout="
+              hasPinnedRows
+                ? undefined
+                : rowData.length < 30 && previewRowHeightsPx.length === 0
+                  ? 'autoHeight'
+                  : undefined
+            "
             @grid-ready="onGridReady"
             @first-data-rendered="onFirstDataRendered"
           />

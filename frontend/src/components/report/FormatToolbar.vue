@@ -333,6 +333,8 @@ function writeImageToCell(url: string) {
   const cell = designerStore.ensureCell(anchor)
   cell.type = 'image'
   cell.value = url
+  // 默认走「嵌入单元格」导出，与后端缺省一致；用户可在设置面板取消勾选
+  delete cell.embedImageInCell
   emit('refreshCells')
 }
 

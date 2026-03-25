@@ -72,9 +72,17 @@ export function renderReport(templateId: string, params: Record<string, unknown>
 /**
  * 导出报表为 Excel 文件（返回 Blob）
  * @param req 导出请求体
+ *
+ * 说明：
+ * - 默认 http 实例超时为 30s（见 http.ts），大数据量导出（如 10 万行）容易在前端先超时；
+ * - 这里单独放宽导出接口超时，避免影响其它普通 API 的快速失败策略。
  */
 export function exportReport(req: ReportExportRequest) {
-  return http.post('/api/report/export', req, { responseType: 'blob' })
+  return http.post('/api/report/export', req, {
+    responseType: 'blob',
+    // 10 分钟；如需更大可继续上调，或改为 0（不超时）
+    timeout: 10 * 60 * 1000,
+  })
 }
 
 /**

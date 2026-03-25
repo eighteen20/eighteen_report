@@ -94,6 +94,12 @@ export interface CellData {
   value?: string
   style?: CellStyle
   type?: 'text' | 'number' | 'image' | 'barcode' | 'qrcode'
+  /**
+   * 仅对 type=image 有意义。与后端 Excel 导出时 POI {@code ClientAnchor} 行为对应。
+   * true（默认）：{@code AnchorType.MOVE_AND_RESIZE}，图片随单元格移动并随单元格缩放；
+   * false：{@code AnchorType.MOVE_DONT_RESIZE}，随单元格移动但不随单元格缩放。
+   */
+  embedImageInCell?: boolean
 }
 
 /** 合并区域定义 */
@@ -194,7 +200,10 @@ export interface ReportRenderResponse {
   styles: (CellStyle | null)[][]
   merges: MergeRegion[]
   colCount: number
-  rowHeights?: Record<string, number>
+  /**
+   * 与 cells 每一输出行对齐的行高（px）；变量模板行展开出的多行共用该模板行在行号菜单里配置的高度。
+   */
+  rowHeightsPx?: number[]
   freezeHeaderRows?: number
   /** 动态水印文本：后端可在渲染时返回，用于覆盖模板固定水印 */
   watermark?: string
