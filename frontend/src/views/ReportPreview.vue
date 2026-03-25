@@ -599,6 +599,34 @@ async function doExport() {
 }
 
 // ============================================================
+// 导出 PDF
+// ============================================================
+
+async function doExportPdf() {
+  exportLoading.value = true
+  try {
+    const res = await exportReport({
+      templateId: templateId.value,
+      queryParams: {},
+      format: 'pdf',
+    })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${templateName.value || 'report'}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    messager.danger('导出失败：' + (e as Error).message)
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+// ============================================================
 // 工具函数
 // ============================================================
 
@@ -685,6 +713,14 @@ function inferEffectiveColCount(
         @click="doExport"
       >
         导出 Excel
+      </BaseButton>
+      <BaseButton
+        variant="default"
+        :loading="exportLoading"
+        :disabled="loading || !!errorMsg"
+        @click="doExportPdf"
+      >
+        导出 PDF
       </BaseButton>
     </header>
 

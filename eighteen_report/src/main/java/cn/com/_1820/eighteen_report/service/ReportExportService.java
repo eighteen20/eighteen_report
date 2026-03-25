@@ -9,28 +9,33 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.MultiFormatWriter;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
+import com.itextpdf.io.font.PdfEncodings;
+import com.itextpdf.io.font.FontProgram;
+import com.itextpdf.io.font.FontProgramFactory;
+import com.itextpdf.io.font.constants.StandardFonts;
+import com.itextpdf.io.image.ImageDataFactory;
+import com.itextpdf.kernel.colors.DeviceRgb;
+import com.itextpdf.kernel.font.PdfFont;
+import com.itextpdf.kernel.font.PdfFontFactory;
+import com.itextpdf.kernel.geom.PageSize;
+import com.itextpdf.kernel.pdf.PdfDocument;
+import com.itextpdf.kernel.pdf.PdfWriter;
+import com.itextpdf.kernel.pdf.canvas.PdfCanvas;
+import com.itextpdf.kernel.pdf.extgstate.PdfExtGState;
+import com.itextpdf.kernel.events.PdfDocumentEvent;
+import com.itextpdf.layout.Document;
+import com.itextpdf.layout.borders.Border;
+import com.itextpdf.layout.borders.SolidBorder;
+import com.itextpdf.layout.element.Image;
+import com.itextpdf.layout.element.Paragraph;
+import com.itextpdf.layout.element.Table;
+import com.itextpdf.layout.properties.TextAlignment;
+import com.itextpdf.layout.properties.UnitValue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.ss.usermodel.BorderStyle;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.CellStyle;
-import org.apache.poi.ss.usermodel.ClientAnchor;
-import org.apache.poi.ss.usermodel.CreationHelper;
-import org.apache.poi.ss.usermodel.Drawing;
-import org.apache.poi.ss.usermodel.FillPatternType;
-import org.apache.poi.ss.usermodel.Font;
-import org.apache.poi.ss.usermodel.HorizontalAlignment;
-import org.apache.poi.ss.usermodel.Picture;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.VerticalAlignment;
+import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
-import org.apache.poi.xssf.usermodel.XSSFCellStyle;
-import org.apache.poi.xssf.usermodel.XSSFClientAnchor;
-import org.apache.poi.xssf.usermodel.XSSFColor;
-import org.apache.poi.xssf.usermodel.XSSFSheet;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xssf.usermodel.*;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -43,16 +48,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -109,7 +105,7 @@ public class ReportExportService {
             return exportExcel(request.getTemplateId(), rendered);
         }
         if ("pdf".equals(format)) {
-            throw new UnsupportedOperationException("PDF 导出尚未实现");
+            return exportPdf(request.getTemplateId(), rendered);
         }
         throw new IllegalArgumentException("不支持的导出格式: " + request.getFormat());
     }
@@ -256,6 +252,490 @@ public class ReportExportService {
         } catch (Exception e) {
             throw new RuntimeException("Excel 导出失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 导出 PDF：直接绘制表格（含样式、合并、行高列宽与媒体图片）。
+     *
+     * <p>当前实现目标：</p>
+     * <ul>
+     *   <li>尽量复用现有渲染结果与媒体下载/生成逻辑；</li>
+     *   <li>冻结行：通过 iText Table header cell 重复显示（视觉上类似冻结表头）；</li>
+     *   <li>图片：媒体以单元格内嵌方式绘制，并按 75% inset 缩放避免遮挡边框线。</li>
+     * </ul>
+     *
+     * @param templateId 模板 ID
+     * @param rendered   渲染结果（已变量替换与行展开）
+     * @return PDF 文件结果
+     */
+    private ExportResult exportPdf(String templateId, ReportRenderResponse rendered) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            Map<String, Object> templateContent = readTemplateContent(templateId);
+            GridMetaExportConfig cfg = parseGridMetaExportConfig(templateContent, rendered);
+            MediaTypeContext mediaTypeCtx = parseMediaTypeContext(templateContent);
+            MergePlacementContext mergeCtx = buildMergePlacementContext(rendered.getMerges());
+
+            List<List<String>> cells = rendered.getCells() != null ? rendered.getCells() : List.of();
+            List<List<Map<String, String>>> styles = rendered.getStyles() != null ? rendered.getStyles() : List.of();
+
+            int rowCount = cells.size();
+            int colCount = Math.max(1, rendered.getColCount());
+
+            // 列宽（px -> pt）与行高（px -> pt）
+            double[] colWidthsPt = new double[colCount];
+            for (int c = 0; c < colCount; c++) {
+                int px = cfg.colWidths.getOrDefault(c, cfg.defaultColWidthPx);
+                colWidthsPt[c] = pxToPoint(px);
+            }
+
+            List<Integer> rowHeightsPx = rendered.getRowHeightsPx();
+            double[] rowHeightsPt = new double[rowCount];
+            for (int r = 0; r < rowCount; r++) {
+                int px = cfg.defaultRowHeightPx;
+                if (rowHeightsPx != null && r < rowHeightsPx.size()) {
+                    Integer v = rowHeightsPx.get(r);
+                    if (v != null && v > 0) px = v;
+                }
+                rowHeightsPt[r] = pxToPoint(px);
+            }
+
+            PdfWriter writer = new PdfWriter(out);
+            PdfDocument pdfDocument = new PdfDocument(writer);
+            pdfDocument.setDefaultPageSize(PageSize.A4.rotate());
+            Document doc = new Document(pdfDocument);
+            doc.setMargins(12, 12, 12, 12);
+
+            // 字体：优先加载 NotoSansCJK（classpath:fonts/...）；否则回退到标准字体。
+            // 这里不依赖资源路径的前导 "/"，loadNotoOrFallback 内部会做双路径兜底。
+            PdfFont regularFont = loadNotoOrFallback("fonts/NotoSansCJKsc-Regular.otf");
+            PdfFont boldFont = loadNotoOrFallback("fonts/NotoSansCJKsc-Bold.otf");
+
+            // 水印：使用渲染接口返回的 dynamic/fixed watermark，在每页以低透明度斜向平铺绘制。
+            // 注意：前端是通过 SVG pattern 平铺实现，这里用 iText 的图形状态 + 文字矩阵近似复现。
+            String watermarkText = rendered.getWatermark();
+            PdfFont watermarkFont = regularFont != null ? regularFont : boldFont;
+            if (watermarkText != null && !watermarkText.isBlank() && watermarkFont != null) {
+                final float watermarkOpacity = 0.12f; // 对齐前端 rgba(...,0.12)
+                final float watermarkFontSizePt = 12f; // 16px * 0.75（96dpi -> 72pt）
+                final float angleRad = (float) Math.toRadians(-30);
+                final PdfExtGState extGState = new PdfExtGState().setFillOpacity(watermarkOpacity);
+
+                pdfDocument.addEventHandler(PdfDocumentEvent.START_PAGE, new com.itextpdf.kernel.events.IEventHandler() {
+                    @Override
+                    public void handleEvent(com.itextpdf.kernel.events.Event event) {
+                        try {
+                            PdfDocumentEvent pdfEvent = (PdfDocumentEvent) event;
+                            var page = pdfEvent.getPage();
+                        PdfCanvas canvas = new PdfCanvas(page.newContentStreamBefore(), page.getResources(), pdfDocument);
+                        canvas.saveState();
+                        canvas.setFillColor(new DeviceRgb(17, 24, 39));
+                        canvas.setExtGState(extGState);
+                        canvas.beginText();
+                        canvas.setFontAndSize(watermarkFont, watermarkFontSizePt);
+
+                        // 与前端 watermarkDensity=1 时的 SVG pattern 尺寸对齐（仅用于近似平铺节奏）
+                        float density = 1f;
+                        float tileWPx = 360f * density;
+                        float tileHPx = 240f * density;
+                        float tileWPt = tileWPx * 72f / 96f;
+                        float tileHPt = tileHPx * 72f / 96f;
+
+                        float cos = (float) Math.cos(angleRad);
+                        float sin = (float) Math.sin(angleRad);
+
+                        float pageW = page.getPageSize().getWidth();
+                        float pageH = page.getPageSize().getHeight();
+
+                        for (float x = -tileWPt; x < pageW + tileWPt; x += tileWPt) {
+                            for (float y = -tileHPt; y < pageH + tileHPt; y += tileHPt) {
+                                // 这里用 x/y 作为基线中心点（配合 setTextMatrix 的旋转矩阵）
+                                float cx = x + tileWPt / 2f;
+                                float cy = y + tileHPt / 2f;
+                                canvas.setTextMatrix(cos, sin, -sin, cos, cx, cy);
+                                canvas.showText(watermarkText);
+                            }
+                        }
+
+                        canvas.endText();
+                        canvas.restoreState();
+                        } catch (Exception ignored) {
+                            // 水印失败时不影响主内容导出可用性
+                        }
+                    }
+                });
+            }
+
+            // 默认边框颜色（与前端 #374151 一致）
+            DeviceRgb defaultBorderColor = new DeviceRgb(55, 65, 81);
+            float borderWidthPt = 0.5f;
+
+            float[] tableColWidths = new float[colCount];
+            for (int c = 0; c < colCount; c++) {
+                tableColWidths[c] = (float) colWidthsPt[c];
+            }
+
+            float totalWidthPt = 0f;
+            for (float w : tableColWidths) totalWidthPt += w;
+
+            Table table = new Table(UnitValue.createPointArray(tableColWidths));
+            table.setWidth(UnitValue.createPointValue(totalWidthPt));
+            table.setMargin(0);
+
+            int freezeHeaderRows = Math.max(0, cfg.freezeHeaderRows);
+            int headerRows = Math.min(freezeHeaderRows, rowCount);
+
+            // 媒体缓存：同一个媒体源只生成/下载一次，避免重复下载
+            Map<String, Optional<MediaBinary>> mediaBinaryCache = new HashMap<>();
+
+            for (int r = 0; r < rowCount; r++) {
+                boolean isHeader = r < headerRows;
+                List<String> rowVals = cells.get(r) != null ? cells.get(r) : List.of();
+
+                for (int c = 0; c < colCount; ) {
+                    CellKey key = new CellKey(r, c);
+                    if (mergeCtx.coveredCells.contains(key)) {
+                        c++;
+                        continue;
+                    }
+
+                    CellRangeAddress region = mergeCtx.mergeStartRegion.get(key);
+                    int colSpan = region != null ? (region.getLastColumn() - region.getFirstColumn() + 1) : 1;
+                    int rowSpan = region != null ? (region.getLastRow() - region.getFirstRow() + 1) : 1;
+
+                    double cellW = 0;
+                    for (int cc = c; cc < Math.min(colCount, c + colSpan); cc++) cellW += colWidthsPt[cc];
+                    double cellH = 0;
+                    for (int rr = r; rr < Math.min(rowCount, r + rowSpan); rr++) cellH += rowHeightsPt[rr];
+
+                    // 样式
+                    Map<String, String> styleMap = null;
+                    if (r < styles.size() && styles.get(r) != null) {
+                        List<Map<String, String>> rowStyles = styles.get(r);
+                        if (c < rowStyles.size()) styleMap = rowStyles.get(c);
+                    }
+
+                    // 单元格内容：优先取合并锚点 value；若锚点为空（但合并覆盖区可能仍有文本），
+                    // 则在合并矩形范围内扫描第一个非空字符串，避免合并区域文字丢失。
+                    String value = c < rowVals.size() ? rowVals.get(c) : "";
+                    if ((region != null) && (value == null || value.isBlank())) {
+                        boolean found = false;
+                        int endR = Math.min(rowCount, r + rowSpan);
+                        int endC = Math.min(colCount, c + colSpan);
+                        for (int rr = r; rr < endR && !found; rr++) {
+                            List<String> scanRowVals = cells.get(rr);
+                            if (scanRowVals == null) continue;
+                            for (int cc = c; cc < endC; cc++) {
+                                String sv = cc < scanRowVals.size() ? scanRowVals.get(cc) : "";
+                                if (sv != null && !sv.isBlank()) {
+                                    value = sv;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    com.itextpdf.layout.element.Cell pdfCell = new com.itextpdf.layout.element.Cell(rowSpan, colSpan);
+                    pdfCell.setPadding(1f);
+                    // 只设置最小高度，避免 iText 在强制高度下裁剪多行文本（表现为“文本丢失”）
+                    pdfCell.setMinHeight((float) cellH + 0.5f);
+                    pdfCell.setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE);
+                    pdfCell.setBorder(Border.NO_BORDER);
+
+                    // 边框
+                    if (styleMap != null && !styleMap.isEmpty()) {
+                        if (hasBorder(styleMap.get("borderTop"))) pdfCell.setBorderTop(new SolidBorder(defaultBorderColor, borderWidthPt));
+                        if (hasBorder(styleMap.get("borderBottom"))) pdfCell.setBorderBottom(new SolidBorder(defaultBorderColor, borderWidthPt));
+                        if (hasBorder(styleMap.get("borderLeft"))) pdfCell.setBorderLeft(new SolidBorder(defaultBorderColor, borderWidthPt));
+                        if (hasBorder(styleMap.get("borderRight"))) pdfCell.setBorderRight(new SolidBorder(defaultBorderColor, borderWidthPt));
+                    }
+
+                    // 背景色
+                    if (styleMap != null && !styleMap.isEmpty()) {
+                        String bg = styleMap.get("backgroundColor");
+                        XSSFColor bgColor = parseCssColor(bg);
+                        if (bgColor != null) {
+                            DeviceRgb rgb = xssfColorToDeviceRgb(bgColor);
+                            if (rgb != null) pdfCell.setBackgroundColor(rgb);
+                        }
+                    }
+
+                    // 字体/对齐
+                    PdfFont cellFont = regularFont;
+                    DeviceRgb fontColorRgb = null;
+                    int fontSizePt = -1;
+                    TextAlignment textAlign = TextAlignment.LEFT;
+                    if (styleMap != null && !styleMap.isEmpty()) {
+                        String fw = lower(styleMap.get("fontWeight"));
+                        boolean bold = "bold".equals(fw) || "700".equals(fw) || "800".equals(fw) || "900".equals(fw);
+                        if (bold && boldFont != null) cellFont = boldFont;
+
+                        Short pt = parseFontSizePt(styleMap.get("fontSize"));
+                        if (pt != null && pt > 0) fontSizePt = pt;
+
+                        String align = lower(styleMap.get("textAlign"));
+                        if ("left".equals(align)) textAlign = TextAlignment.LEFT;
+                        else if ("right".equals(align)) textAlign = TextAlignment.RIGHT;
+                        else if ("center".equals(align)) textAlign = TextAlignment.CENTER;
+
+                        // 字体颜色与 italic 策略（italic 不额外下载时由 iText 做近似渲染）
+                        String colorCss = styleMap.get("color");
+                        XSSFColor fontColor = parseCssColor(colorCss);
+                        if (fontColor != null) {
+                            fontColorRgb = xssfColorToDeviceRgb(fontColor);
+                            if (fontColorRgb != null) pdfCell.setFontColor(fontColorRgb);
+                        }
+                        String fontStyle = lower(styleMap.get("fontStyle"));
+                        if (fontStyle != null && (fontStyle.contains("italic") || fontStyle.contains("oblique"))) {
+                            pdfCell.setItalic();
+                        }
+                    }
+
+                    // 绘制媒体（image/qrcode/barcode）
+                    String mediaType = resolveMediaType(mediaTypeCtx, r, c);
+                    boolean shouldTryMedia = isMediaType(mediaType) && value != null && !value.isBlank();
+                    if (shouldTryMedia) {
+                        String mediaCacheKey = mediaType + "|" + value;
+                        Optional<MediaBinary> mediaOpt = mediaBinaryCache.get(mediaCacheKey);
+                        if (mediaOpt == null) {
+                            mediaOpt = resolveMediaBinary(mediaType, value);
+                            mediaBinaryCache.put(mediaCacheKey, mediaOpt);
+                        }
+                        if (mediaOpt != null && mediaOpt.isPresent()) {
+                            MediaBinary media = mediaOpt.get();
+                            float targetW = (float) (cellW * MEDIA_ANCHOR_FILL_FRACTION);
+                            float targetH = (float) (cellH * MEDIA_ANCHOR_FILL_FRACTION);
+                            Image img = new Image(ImageDataFactory.create(media.bytes()));
+                            img.setAutoScale(false);
+                            img.scaleToFit(targetW, targetH);
+                            img.setHorizontalAlignment(com.itextpdf.layout.properties.HorizontalAlignment.CENTER);
+                            pdfCell.add(img);
+                        } else {
+                            // 降级：图片生成失败则输出原文本
+                            if (value != null && !value.isBlank()) {
+                                Paragraph p = new Paragraph(value).setFont(cellFont).setMargin(0).setTextAlignment(textAlign);
+                                // 给一个较保守的行高，减少“强制高度下被裁剪”的概率
+                                p.setMultipliedLeading(1.1f);
+                                if (fontSizePt > 0) p.setFontSize(fontSizePt);
+                                pdfCell.add(p);
+                            }
+                        }
+                    } else {
+                        // 普通文本
+                        if (value != null && !value.isBlank()) {
+                            Paragraph p = new Paragraph(value).setFont(cellFont).setMargin(0).setTextAlignment(textAlign);
+                            // 给一个较保守的行高，减少“强制高度下被裁剪”的概率
+                            p.setMultipliedLeading(1.1f);
+                            if (fontSizePt > 0) p.setFontSize(fontSizePt);
+                            pdfCell.add(p);
+                        }
+                    }
+
+                    if (isHeader) {
+                        table.addHeaderCell(pdfCell);
+                    } else {
+                        table.addCell(pdfCell);
+                    }
+
+                    c += Math.max(1, colSpan);
+                }
+            }
+
+            doc.add(table);
+            doc.close();
+
+            return new ExportResult(
+                    "application/pdf",
+                    "report.pdf",
+                    out.toByteArray()
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("PDF 导出失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** px（屏幕单位）换算为 PDF point（1pt=1/72in；96dpi -> 72pt） */
+    private static double pxToPoint(int px) {
+        return px * 72.0d / 96.0d;
+    }
+
+    /**
+     * 加载 NotoSansCJK 字体：按 classpath 路径读取并嵌入；失败则回退标准字体（中文可能显示方块）。
+     *
+     * @param classpathResource 类路径资源，如 {@code /fonts/NotoSansCJKsc-Regular.otf}
+     */
+    private PdfFont loadNotoOrFallback(String classpathResource) {
+        boolean wantBold = classpathResource != null && classpathResource.toLowerCase(Locale.ROOT).contains("bold");
+
+        // 1) 优先加载 Noto OTF（你当前 Regular/Bold 均已成功下载到大文件体积时，这一步应能覆盖中文）
+        try {
+            String p1 = classpathResource;
+            String p2 = classpathResource.startsWith("/") ? classpathResource.substring(1) : "/" + classpathResource;
+
+            java.io.InputStream is = getClass().getResourceAsStream(p1);
+            if (is == null) is = getClass().getResourceAsStream(p2);
+            if (is == null) is = Thread.currentThread().getContextClassLoader().getResourceAsStream(p1);
+            if (is == null) is = Thread.currentThread().getContextClassLoader().getResourceAsStream(p2);
+
+            if (is != null) {
+                try (java.io.InputStream in = is) {
+                    byte[] bytes = in.readAllBytes();
+                    PdfFont font = PdfFontFactory.createFont(
+                            bytes,
+                            PdfEncodings.IDENTITY_H,
+                            PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED,
+                            true
+                    );
+                    if (font != null) {
+                        log.warn("PDF 中文字体加载：使用 Noto OTF: {}", classpathResource);
+                        return font;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("加载 Noto OTF 失败: resource={}, error={}", classpathResource, e.getMessage());
+        }
+
+        // 2) bold 加载失败时，用 regular OTF 兜底（避免 Helvetica 导致方块字）
+        if (wantBold) {
+            try {
+                String regularRes = "fonts/NotoSansCJKsc-Regular.otf";
+                String p1 = regularRes;
+                String p2 = regularRes.startsWith("/") ? regularRes.substring(1) : "/" + regularRes;
+
+                java.io.InputStream is = getClass().getResourceAsStream(p1);
+                if (is == null) is = getClass().getResourceAsStream(p2);
+                if (is == null) is = Thread.currentThread().getContextClassLoader().getResourceAsStream(p1);
+                if (is == null) is = Thread.currentThread().getContextClassLoader().getResourceAsStream(p2);
+
+                if (is != null) {
+                    try (java.io.InputStream in = is) {
+                        byte[] bytes = in.readAllBytes();
+                        PdfFont font = PdfFontFactory.createFont(
+                                bytes,
+                                PdfEncodings.IDENTITY_H,
+                                PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED,
+                                true
+                        );
+                        if (font != null) {
+                            log.warn("PDF 中文字体加载：bold Noto OTF 失败，回退到 Noto regular");
+                            return font;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("bold Noto regular 回退失败: error={}", e.getMessage());
+            }
+            // bold OTF + regular OTF 都失败时，不再回退 Helvetica（避免方块字）
+            return null;
+        }
+
+        // 3) Noto OTF 都失败，最后尝试 TTC（可能仍因映射/face 导致 containsGlyph=0，因此仅作为兜底）
+        try {
+            PdfFont ttcFont = loadTtcFontOrNull(
+                    wantBold ? "fonts/STHeiti-Medium.ttc" : "fonts/STHeiti-Light.ttc",
+                    0
+            );
+            if (ttcFont != null) {
+                log.warn("PDF 中文字体加载：使用 TTC兜底");
+                return ttcFont;
+            }
+        } catch (Exception ignored) {
+            // ignore
+        }
+
+        // 4) 最终兜底：regular 回退 Helvetica，bold 返回 null
+        try {
+            PdfFont f = PdfFontFactory.createFont(StandardFonts.HELVETICA, PdfEncodings.WINANSI);
+            log.warn("PDF 中文字体加载：回退 Helvetica（可能不支持中文，但避免导出中断）");
+            return f;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * 加载 TTC 并创建 PdfFont：失败返回 null。
+     *
+     * @param classpathTtcResource classpath 资源，如 {@code fonts/STHeiti-Light.ttc}
+     * @param ttcIndex             TTC 内字体索引（通常 0）
+     */
+    private PdfFont loadTtcFontOrNull(String classpathTtcResource, int ttcIndex) {
+        try {
+            String p1 = classpathTtcResource;
+            String p2 = classpathTtcResource.startsWith("/") ? classpathTtcResource.substring(1) : "/" + classpathTtcResource;
+
+            java.io.InputStream is = getClass().getResourceAsStream(p1);
+            if (is == null) is = getClass().getResourceAsStream(p2);
+            if (is == null) is = Thread.currentThread().getContextClassLoader().getResourceAsStream(p1);
+            if (is == null) is = Thread.currentThread().getContextClassLoader().getResourceAsStream(p2);
+            if (is == null) return null;
+
+            byte[] bytes;
+            try (java.io.InputStream in = is) {
+                bytes = in.readAllBytes();
+            }
+
+            // 由于 TTC 内部可能存在多个字体 face，且不同 encoding(IDENTITY_H/V) 对字形映射会有影响，
+            // 我们创建候选字体后用 containsGlyph() 检测关键中文字符是否可用，选择得分最高的那个返回。
+            String test = "用户中文";
+            float bestScore = -1;
+            PdfFont bestFont = null;
+
+            String[] encodings = new String[] { PdfEncodings.IDENTITY_H, PdfEncodings.IDENTITY_V };
+            for (int idx = ttcIndex; idx < ttcIndex + 8; idx++) {
+                FontProgram fp;
+                try {
+                    fp = FontProgramFactory.createFont(bytes, idx, true);
+                } catch (Exception ignore) {
+                    continue;
+                }
+                if (fp == null) continue;
+
+                for (String enc : encodings) {
+                    PdfFont font = PdfFontFactory.createFont(
+                            fp,
+                            enc,
+                            PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED
+                    );
+                    if (font == null) continue;
+
+                    float score = 0;
+                    for (int i = 0; i < test.length(); i++) {
+                        int cp = test.codePointAt(i);
+                        if (font.containsGlyph(cp)) score += 1;
+                    }
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestFont = font;
+                    }
+                }
+            }
+
+            if (bestFont != null) {
+                log.warn("PDF 中文 TTC 字体选择：resource={}, fromIndex={}, bestScore={}", classpathTtcResource, ttcIndex, bestScore);
+            }
+            return bestFont;
+        } catch (Exception e) {
+            log.warn("TTC 字体兜底加载失败: resource={}, error={}", classpathTtcResource, e.getMessage());
+            return null;
+        }
+    }
+
+    /** XSSFColor 转 iText DeviceRgb（无透明度时取 RGB）。 */
+    private DeviceRgb xssfColorToDeviceRgb(XSSFColor c) {
+        if (c == null) return null;
+        byte[] rgb = c.getRGB();
+        if (rgb == null || rgb.length < 3) {
+            rgb = c.getRGBWithTint();
+        }
+        if (rgb == null || rgb.length < 3) return null;
+        int r = rgb[0] & 0xFF;
+        int g = rgb[1] & 0xFF;
+        int b = rgb[2] & 0xFF;
+        return new DeviceRgb(r, g, b);
     }
 
     /**

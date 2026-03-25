@@ -213,7 +213,7 @@ export interface ReportRenderResponse {
 export interface ReportExportRequest {
   templateId: string
   queryParams?: Record<string, unknown>
-  format?: 'xlsx'
+  format?: 'xlsx' | 'pdf'
 }
 
 /* =========================================================

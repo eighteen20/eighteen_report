@@ -45,6 +45,11 @@ dependencies {
     // 二维码 / 条形码（导出 Excel 媒体嵌图）
     implementation 'com.google.zxing:core:3.5.3'
     implementation 'com.google.zxing:javase:3.5.3'
+    // PDF 导出：后端直接绘制报表（复用渲染结果矩阵、样式与媒体）
+    // iText 7 通常需要显式引入 kernel/layout/io，确保 IDE/编译能解析 Cell/Paragraph/PdfFont 等类型
+    implementation 'com.itextpdf:kernel:7.2.6'
+    implementation 'com.itextpdf:layout:7.2.6'
+    implementation 'com.itextpdf:io:7.2.6'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     runtimeOnly 'com.mysql:mysql-connector-j'
