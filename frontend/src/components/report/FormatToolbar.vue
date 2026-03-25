@@ -105,7 +105,7 @@ function toggleBorderMenu() {
   }
 }
 
-/** 边框预设（与 design.ftl 一致） */
+/** 边框预设（与旧版边框菜单一致） */
 const borderPresets: { value: 'all' | 'outer' | 'top' | 'bottom' | 'left' | 'right' | 'none'; label: string }[] = [
   { value: 'all', label: '所有边框' },
   { value: 'outer', label: '外侧边框' },

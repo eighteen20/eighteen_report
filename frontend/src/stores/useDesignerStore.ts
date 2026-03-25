@@ -255,7 +255,7 @@ export const useDesignerStore = defineStore('designer', () => {
   }
 
   /**
-   * 按预设为选区设置边框（与旧版 design.ftl 边框菜单一致）
+   * 按预设为选区设置边框（与旧版边框菜单一致）
    * @param preset all=四边 | outer=仅选区外框 | top/bottom/left/right=单边 | none=清除四边
    */
   function setSelectionBorder(preset: 'all' | 'outer' | 'top' | 'bottom' | 'left' | 'right' | 'none') {

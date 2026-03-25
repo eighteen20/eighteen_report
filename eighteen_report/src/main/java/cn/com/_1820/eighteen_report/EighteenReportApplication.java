@@ -6,7 +6,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 /**
- * Eighteen Report 报表工具主启动类。基于 Spring Boot 4 + FreeMarker + AG Grid 的轻量级报表设计/预览/导出平台。
+ * Eighteen Report 报表工具主启动类。
+ *
+ * 项目采用 Spring Boot 4 承载后端接口与静态资源，并由前端完成报表设计/预览渲染，后端负责渲染与导出能力。
  */
 @SpringBootApplication
 @EnableConfigurationProperties(WatermarkCallbackProperties.class)
