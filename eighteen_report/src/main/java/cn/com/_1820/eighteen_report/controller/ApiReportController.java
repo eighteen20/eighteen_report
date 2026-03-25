@@ -1,7 +1,8 @@
 package cn.com._1820.eighteen_report.controller;
 
 import cn.com._1820.eighteen_report.dto.*;
-import cn.com._1820.eighteen_report.service.ReportExportService;
+import cn.com._1820.eighteen_report.service.export.ExportResult;
+import cn.com._1820.eighteen_report.service.export.ReportExportFacade;
 import cn.com._1820.eighteen_report.service.ReportImageUploadService;
 import cn.com._1820.eighteen_report.service.ReportQueryService;
 import cn.com._1820.eighteen_report.service.ReportRenderService;
@@ -27,7 +28,7 @@ public class ApiReportController {
     private final ReportTemplateService templateService;
     private final ReportQueryService queryService;
     private final ReportRenderService renderService;
-    private final ReportExportService exportService;
+    private final ReportExportFacade exportService;
     private final ReportImageUploadService imageUploadService;
 
     /**
@@ -96,11 +97,11 @@ public class ApiReportController {
     }
 
     /**
-     * 导出报表为 Excel 文件
+     * 导出报表文件（xlsx/pdf）：返回字节流供前端下载。
      */
     @PostMapping(value = "/export", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     public ResponseEntity<byte[]> export(@RequestBody ReportExportRequest request) {
-        ReportExportService.ExportResult result = exportService.export(request);
+        ExportResult result = exportService.export(request);
         String filename = result.filename();
         if (filename != null && !filename.isEmpty()) {
             String encoded = java.net.URLEncoder.encode(filename, java.nio.charset.StandardCharsets.UTF_8)
