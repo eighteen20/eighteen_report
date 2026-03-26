@@ -1,7 +1,8 @@
 # ============================
 # Eighteen Report 报表工具配置
 # ============================
-
+spring.profiles:
+  active: dev
 server:
   port: 9876                    # 应用端口
 
@@ -25,11 +26,6 @@ spring:
     multipart:
       max-file-size: 20MB       # 单个文件上传大小上限（图片中转用）
       max-request-size: 22MB    # 单次请求总大小上限（略大于 max-file-size）
-  datasource:
-    url: jdbc:mysql://localhost:3306/eighteen_report?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
-    username: root               # 数据库用户名
-    password: root               # 数据库密码
-    driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
       ddl-auto: update           # 自动更新表结构（开发环境）

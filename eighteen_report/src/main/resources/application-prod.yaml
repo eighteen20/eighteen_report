@@ -1,0 +1,20 @@
+# ============================
+# Eighteen Report 报表工具配置
+# ============================
+spring:
+  datasource:
+    # 关键点：容器内的 localhost 指向容器自身，不是宿主机。
+    # 如需连接“宿主机 MySQL”，请使用 host.docker.internal（并在 docker run 时映射 host-gateway 以兼容 Linux）。
+    url: jdbc:mysql://host.docker.internal:6033/eighteen_report?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
+    username: root               # 数据库用户名
+    password: mysql_HiDpyA               # 数据库密码
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate         # 启动时校验表结构和实体是否一致，不改库
+    show-sql: false              # 是否打印 SQL
+    properties:
+      hibernate:
+        format_sql: true         # 格式化 SQL 输出
+        dialect: org.hibernate.dialect.MySQLDialect
+    open-in-view: false          # 关闭 OSIV，避免懒加载问题

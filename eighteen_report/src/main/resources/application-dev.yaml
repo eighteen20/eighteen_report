@@ -1,0 +1,18 @@
+# ============================
+# Eighteen Report 报表工具配置
+# ============================
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/eighteen_report?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
+    username: root               # 数据库用户名
+    password: root               # 数据库密码
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update           # 自动更新表结构（开发环境）
+    show-sql: false              # 是否打印 SQL
+    properties:
+      hibernate:
+        format_sql: true         # 格式化 SQL 输出
+        dialect: org.hibernate.dialect.MySQLDialect
+    open-in-view: false          # 关闭 OSIV，避免懒加载问题

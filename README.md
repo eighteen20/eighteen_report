@@ -109,6 +109,10 @@
 3. 访问：
    - `http://localhost:9876`
 
+### 3.1 Docker Compose 部署
+
+Docker 相关文件集中在仓库根目录 **`docker/`**。**不在服务器编译**时，在本机执行 **`./docker/build-for-server.sh`**，会本地构建前端并 `bootJar`，生成 **`eighteen-report-server-bundle/`**（及可选 `tar.gz`），只需将该目录上传到服务器并在其中 `docker/` 下执行 `./docker-up.sh`。详见 **`docker/README.md`**。
+
 ### 4. 页面路由（前端）
 
 - `/report`：报表列表

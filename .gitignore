@@ -36,4 +36,13 @@ logs/
 .env.*.local
 /temp/
 
+# 本地生成的「仅上传服务器」目录与压缩包（见 docker/build-for-server.sh）
+/eighteen-report-server-bundle/
+/eighteen-report-server-bundle.tar.gz
+
 /.cursor/
+
+# Docker 生成的可执行 jar（仅供镜像 COPY 使用）
+/docker/app.jar
+
+/eighteen_report/src/main/resources/static/**
