@@ -41,6 +41,10 @@ public class ReportRenderResponse {
      * - 若未配置回调：可由渲染请求 {@code params.watermark} 传入（兼容旧版；安全性依赖调用链）。
      */
     private String watermark;
+    /**
+     * 按数据集返回分页元信息（key=datasetKey），供预览页页码展示与翻页控制使用。
+     */
+    private Map<String, ReportQueryResponse.PaginationMeta> paginationByDataset;
 
     @Data
     @NoArgsConstructor

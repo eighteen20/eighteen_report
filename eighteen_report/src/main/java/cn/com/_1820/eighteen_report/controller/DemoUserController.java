@@ -1,6 +1,5 @@
 package cn.com._1820.eighteen_report.controller;
 
-import cn.com._1820.eighteen_report.entity.DemoUser;
 import cn.com._1820.eighteen_report.repository.DemoUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,7 +13,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -41,16 +41,55 @@ public class DemoUserController {
     private final DemoUserRepository repository;
 
     /**
-     * 查询所有演示用户
+     * 查询演示用户（分页版，供 API 数据集分页联调用）。
      *
-     * @param page 页码
-     * @param size 每页大小
+     * <p>返回结构示例：</p>
+     * <pre>
+     * {
+     *   "code": 0,
+     *   "message": "ok",
+     *   "data": {
+     *     "records": [ ... ],
+     *     "total": 123,
+     *     "currentPage": 1,
+     *     "pageSize": 20,
+     *     "hasMore": true
+     *   }
+     * }
+     * </pre>
+     *
+     * <p>说明：</p>
+     * <ul>
+     *   <li>入参 {@code page} 使用 1-based（更贴近前端页码展示）；</li>
+     *   <li>数据库查询内部转换为 0-based 的 {@link PageRequest}；</li>
+     *   <li>该响应可用于测试 API 数据集中的 recordsPath/totalPath/currentPagePath/pageSizePath/hasMorePath 映射。</li>
+     * </ul>
+     *
+     * @param page 页码（1-based，默认 1）
+     * @param size 每页大小（默认 20）
      */
     @GetMapping("/list")
-    public ResponseEntity<List<DemoUser>> list(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        return ResponseEntity.ok(repository.findAll(PageRequest.of(page, size)).toList());
+    public ResponseEntity<Map<String, Object>> list(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, size);
+        int pageIndex = safePage - 1;
+
+        var result = repository.findAll(PageRequest.of(pageIndex, safeSize));
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("records", result.getContent());
+        data.put("total", result.getTotalElements());
+        data.put("currentPage", safePage);
+        data.put("pageSize", safeSize);
+        data.put("hasMore", safePage < result.getTotalPages());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", 0);
+        body.put("message", "ok");
+        body.put("data", data);
+        return ResponseEntity.ok(body);
     }
 
     /**

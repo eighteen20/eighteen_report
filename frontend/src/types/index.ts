@@ -59,6 +59,8 @@ export interface DataSourceTestRequest {
   sql?: string
   apiUrl?: string
   apiMethod?: 'GET' | 'POST'
+  /** API 返回中业务数据列表字段路径（点路径），如 data.records */
+  apiRecordsPath?: string
   params?: Record<string, unknown>
 }
 
@@ -180,6 +182,40 @@ export interface DatasetDefinition {
   url?: string
   /** API 类型：请求方法 */
   method?: 'GET' | 'POST'
+  /** 数据集分页配置（按数据集独立控制） */
+  pagination?: DatasetPaginationConfig
+}
+
+/** 数据集分页配置：兼容 SQL/API 两类数据源 */
+export interface DatasetPaginationConfig {
+  /** 是否开启分页 */
+  enabled: boolean
+  /** 默认每页条数（预览页初始值，默认 20） */
+  defaultPageSize?: number
+  /** 请求参数映射（传给 SQL/API） */
+  request?: {
+    /** 页码参数名（1-based） */
+    pageParam?: string
+    /** 每页条数参数名 */
+    pageSizeParam?: string
+    /** 偏移量参数名（0-based） */
+    offsetParam?: string
+    /** 限制条数参数名 */
+    limitParam?: string
+  }
+  /** API 响应字段路径映射（点路径，如 data.records） */
+  response?: {
+    /** 数据列表字段路径 */
+    recordsPath?: string
+    /** 总条数字段路径 */
+    totalPath?: string
+    /** 当前页字段路径 */
+    currentPagePath?: string
+    /** 每页条数字段路径 */
+    pageSizePath?: string
+    /** 是否还有下一页字段路径（可选） */
+    hasMorePath?: string
+  }
 }
 
 /** 完整的报表模板内容（保存到 content 字段的 JSON 结构） */
@@ -207,6 +243,16 @@ export interface ReportRenderResponse {
   freezeHeaderRows?: number
   /** 动态水印文本：后端可在渲染时返回，用于覆盖模板固定水印 */
   watermark?: string
+  /** 渲染阶段回传的数据集分页元信息（key=datasetKey） */
+  paginationByDataset?: Record<string, DatasetPageMeta>
+}
+
+/** 数据集分页元信息 */
+export interface DatasetPageMeta {
+  total?: number
+  currentPage?: number
+  pageSize?: number
+  hasMore?: boolean
 }
 
 /** 导出请求 */
@@ -214,6 +260,8 @@ export interface ReportExportRequest {
   templateId: string
   queryParams?: Record<string, unknown>
   format?: 'xlsx' | 'pdf'
+  /** 导出范围：当前页 / 全部 */
+  exportScope?: 'current' | 'all'
 }
 
 /* =========================================================

@@ -14,4 +14,6 @@ public class ReportExportRequest {
     private Map<String, Object> queryParams;
     /** xlsx | pdf */
     private String format;
+    /** 导出范围：current（当前页）| all（全部） */
+    private String exportScope;
 }

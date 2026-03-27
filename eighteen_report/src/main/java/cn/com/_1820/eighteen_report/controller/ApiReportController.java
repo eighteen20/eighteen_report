@@ -92,7 +92,10 @@ public class ApiReportController {
     public ResponseEntity<ReportRenderResponse> render(@RequestBody ReportQueryRequest request) {
         return ResponseEntity.ok(renderService.render(
                 request.getTemplateId(),
-                request.getParams()
+                request.getParams(),
+                request.getPage(),
+                request.getPageSize(),
+                request.getDatasetKey()
         ));
     }
 

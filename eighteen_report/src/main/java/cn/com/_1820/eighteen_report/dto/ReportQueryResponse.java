@@ -29,5 +29,22 @@ public class ReportQueryResponse {
         private List<String> columns;
         /** 数据行列表（每行为与 columns 对应的值列表） */
         private List<List<Object>> rows;
+        /** 分页元信息（未分页时可为空） */
+        private PaginationMeta pagination;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class PaginationMeta {
+        /** 总条数（可选） */
+        private Long total;
+        /** 当前页（1-based） */
+        private Integer currentPage;
+        /** 每页条数 */
+        private Integer pageSize;
+        /** 是否还有下一页（可选） */
+        private Boolean hasMore;
     }
 }

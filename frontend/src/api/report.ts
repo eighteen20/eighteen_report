@@ -70,6 +70,31 @@ export function renderReport(templateId: string, params: Record<string, unknown>
 }
 
 /**
+ * 渲染报表（分页版）。
+ *
+ * @param templateId 模板主键
+ * @param params 运行时参数
+ * @param page 当前页（1-based）
+ * @param pageSize 每页条数
+ * @param datasetKey 分页目标数据集 key（可选）
+ */
+export function renderReportPaged(
+  templateId: string,
+  params: Record<string, unknown> = {},
+  page = 1,
+  pageSize = 20,
+  datasetKey?: string,
+) {
+  return http.post<ReportRenderResponse>('/api/report/render', {
+    templateId,
+    params,
+    page,
+    pageSize,
+    datasetKey,
+  })
+}
+
+/**
  * 导出报表为 Excel 文件（返回 Blob）
  * @param req 导出请求体
  *

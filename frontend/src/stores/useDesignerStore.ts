@@ -716,6 +716,27 @@ export const useDesignerStore = defineStore('designer', () => {
    */
   function loadContent(content: ReportContent) {
     datasets.value = content.datasets || []
+    // 兼容旧模板：补齐数据集分页默认配置，避免页面读取空字段时出现 undefined 分支判断复杂化
+    datasets.value = datasets.value.map((ds) => ({
+      ...ds,
+      pagination: {
+        enabled: ds.pagination?.enabled === true,
+        defaultPageSize: ds.pagination?.defaultPageSize ?? 20,
+        request: {
+          pageParam: ds.pagination?.request?.pageParam ?? 'page',
+          pageSizeParam: ds.pagination?.request?.pageSizeParam ?? 'pageSize',
+          offsetParam: ds.pagination?.request?.offsetParam ?? 'offset',
+          limitParam: ds.pagination?.request?.limitParam ?? 'limit',
+        },
+        response: {
+          recordsPath: ds.pagination?.response?.recordsPath ?? '',
+          totalPath: ds.pagination?.response?.totalPath ?? '',
+          currentPagePath: ds.pagination?.response?.currentPagePath ?? '',
+          pageSizePath: ds.pagination?.response?.pageSizePath ?? '',
+          hasMorePath: ds.pagination?.response?.hasMorePath ?? '',
+        },
+      },
+    }))
     cells.value = content.cells || {}
     merges.value = content.merges || []
     if (content.gridMeta) {

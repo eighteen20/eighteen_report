@@ -34,6 +34,17 @@ const form = ref({
   sql: '',
   url: '',
   method: 'GET' as 'GET' | 'POST',
+  paginationEnabled: false,
+  defaultPageSize: 20,
+  pageParam: 'page',
+  pageSizeParam: 'pageSize',
+  offsetParam: 'offset',
+  limitParam: 'limit',
+  recordsPath: '',
+  totalPath: '',
+  currentPagePath: '',
+  responsePageSizePath: '',
+  hasMorePath: '',
 })
 
 /** 最近一次测试获取的字段列表 */
@@ -69,6 +80,17 @@ watch(
         sql: ds.sql || '',
         url: ds.url || '',
         method: ds.method || 'GET',
+        paginationEnabled: ds.pagination?.enabled === true,
+        defaultPageSize: ds.pagination?.defaultPageSize ?? 20,
+        pageParam: ds.pagination?.request?.pageParam || 'page',
+        pageSizeParam: ds.pagination?.request?.pageSizeParam || 'pageSize',
+        offsetParam: ds.pagination?.request?.offsetParam || 'offset',
+        limitParam: ds.pagination?.request?.limitParam || 'limit',
+        recordsPath: ds.pagination?.response?.recordsPath || '',
+        totalPath: ds.pagination?.response?.totalPath || '',
+        currentPagePath: ds.pagination?.response?.currentPagePath || '',
+        responsePageSizePath: ds.pagination?.response?.pageSizePath || '',
+        hasMorePath: ds.pagination?.response?.hasMorePath || '',
       }
       testFields.value = ds.fields || []
       testStatus.value = 'idle'
@@ -88,6 +110,17 @@ function resetForm() {
       sql: ds.sql || '',
       url: ds.url || '',
       method: ds.method || 'GET',
+      paginationEnabled: ds.pagination?.enabled === true,
+      defaultPageSize: ds.pagination?.defaultPageSize ?? 20,
+      pageParam: ds.pagination?.request?.pageParam || 'page',
+      pageSizeParam: ds.pagination?.request?.pageSizeParam || 'pageSize',
+      offsetParam: ds.pagination?.request?.offsetParam || 'offset',
+      limitParam: ds.pagination?.request?.limitParam || 'limit',
+      recordsPath: ds.pagination?.response?.recordsPath || '',
+      totalPath: ds.pagination?.response?.totalPath || '',
+      currentPagePath: ds.pagination?.response?.currentPagePath || '',
+      responsePageSizePath: ds.pagination?.response?.pageSizePath || '',
+      hasMorePath: ds.pagination?.response?.hasMorePath || '',
     }
     testFields.value = ds.fields || []
   } else {
@@ -99,6 +132,17 @@ function resetForm() {
       sql: '',
       url: '',
       method: 'GET',
+      paginationEnabled: false,
+      defaultPageSize: 20,
+      pageParam: 'page',
+      pageSizeParam: 'pageSize',
+      offsetParam: 'offset',
+      limitParam: 'limit',
+      recordsPath: '',
+      totalPath: '',
+      currentPagePath: '',
+      responsePageSizePath: '',
+      hasMorePath: '',
     }
     testFields.value = []
   }
@@ -124,6 +168,8 @@ async function doTest() {
             type: 'API' as const,
             apiUrl: form.value.url,
             apiMethod: form.value.method,
+            // 优先按弹窗里配置的“数据列表字段”提取业务字段，避免仅解析到 code/message/data
+            apiRecordsPath: form.value.recordsPath.trim() || undefined,
           }
 
     if (form.value.type === 'SQL') {
@@ -154,6 +200,23 @@ function doSave() {
     key,
     type: form.value.type,
     fields: testFields.value,
+    pagination: {
+      enabled: form.value.paginationEnabled,
+      defaultPageSize: Math.max(1, Number(form.value.defaultPageSize) || 20),
+      request: {
+        pageParam: form.value.pageParam.trim() || 'page',
+        pageSizeParam: form.value.pageSizeParam.trim() || 'pageSize',
+        offsetParam: form.value.offsetParam.trim() || 'offset',
+        limitParam: form.value.limitParam.trim() || 'limit',
+      },
+      response: {
+        recordsPath: form.value.recordsPath.trim(),
+        totalPath: form.value.totalPath.trim(),
+        currentPagePath: form.value.currentPagePath.trim(),
+        pageSizePath: form.value.responsePageSizePath.trim(),
+        hasMorePath: form.value.hasMorePath.trim(),
+      },
+    },
     ...(form.value.type === 'SQL'
       ? { dataSourceId: form.value.dataSourceId || undefined, sql: form.value.sql }
       : { url: form.value.url, method: form.value.method }),
@@ -238,6 +301,69 @@ function doSave() {
           </BaseSelect>
         </div>
       </template>
+
+      <!-- 分页配置 -->
+      <div class="rounded border border-gray-200 p-3 bg-gray-50">
+        <div class="flex items-center justify-between mb-2">
+          <label class="form-label !mb-0">数据集分页</label>
+          <label class="inline-flex items-center gap-2 text-[12px] text-gray-700">
+            <input v-model="form.paginationEnabled" type="checkbox">
+            开启分页
+          </label>
+        </div>
+
+        <div v-if="form.paginationEnabled" class="space-y-3">
+          <div class="form-row">
+            <label class="form-label">默认每页条数</label>
+            <BaseInput v-model="form.defaultPageSize" type="number" :min="1" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div class="form-row">
+              <label class="form-label">页码参数名</label>
+              <BaseInput v-model="form.pageParam" placeholder="page" />
+            </div>
+            <div class="form-row">
+              <label class="form-label">每页参数名</label>
+              <BaseInput v-model="form.pageSizeParam" placeholder="pageSize" />
+            </div>
+            <div class="form-row">
+              <label class="form-label">偏移量参数名</label>
+              <BaseInput v-model="form.offsetParam" placeholder="offset" />
+            </div>
+            <div class="form-row">
+              <label class="form-label">限制条数参数名</label>
+              <BaseInput v-model="form.limitParam" placeholder="limit" />
+            </div>
+          </div>
+
+          <div v-if="form.type === 'API'" class="space-y-2">
+            <div class="text-[12px] text-gray-600">API 响应字段路径映射（点路径，例如 data.records）</div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="form-row">
+                <label class="form-label">数据列表字段</label>
+                <BaseInput v-model="form.recordsPath" placeholder="data.records" />
+              </div>
+              <div class="form-row">
+                <label class="form-label">总数字段</label>
+                <BaseInput v-model="form.totalPath" placeholder="data.total" />
+              </div>
+              <div class="form-row">
+                <label class="form-label">当前页字段</label>
+                <BaseInput v-model="form.currentPagePath" placeholder="data.page" />
+              </div>
+              <div class="form-row">
+                <label class="form-label">每页字段</label>
+                <BaseInput v-model="form.responsePageSizePath" placeholder="data.pageSize" />
+              </div>
+              <div class="form-row col-span-2">
+                <label class="form-label">是否还有下一页字段（可选）</label>
+                <BaseInput v-model="form.hasMorePath" placeholder="data.hasMore" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- 测试按钮 -->
       <div>

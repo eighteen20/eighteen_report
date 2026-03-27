@@ -26,15 +26,6 @@ spring:
     multipart:
       max-file-size: 20MB       # 单个文件上传大小上限（图片中转用）
       max-request-size: 22MB    # 单次请求总大小上限（略大于 max-file-size）
-  jpa:
-    hibernate:
-      ddl-auto: update           # 自动更新表结构（开发环境）
-    show-sql: false              # 是否打印 SQL
-    properties:
-      hibernate:
-        format_sql: true         # 格式化 SQL 输出
-        dialect: org.hibernate.dialect.MySQLDialect
-    open-in-view: false          # 关闭 OSIV，避免懒加载问题
   web:
     resources:
       # 静态资源缓存配置（Vue 构建产物文件名含 hash，可长期缓存）

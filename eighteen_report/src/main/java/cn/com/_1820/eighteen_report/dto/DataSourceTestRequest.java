@@ -24,6 +24,8 @@ public class DataSourceTestRequest {
     private Map<String, String> apiHeaders;
     /** API 请求体（type=API, method=POST 时） */
     private String apiBody;
+    /** API 业务数据列表字段路径（点路径，例如 data.records） */
+    private String apiRecordsPath;
     /** 查询参数 */
     private Map<String, Object> params;
 }

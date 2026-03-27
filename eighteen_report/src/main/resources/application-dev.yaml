@@ -10,7 +10,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update           # 自动更新表结构（开发环境）
-    show-sql: false              # 是否打印 SQL
+    show-sql: true              # 是否打印 SQL
     properties:
       hibernate:
         format_sql: true         # 格式化 SQL 输出

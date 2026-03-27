@@ -28,10 +28,10 @@ import type {
   CellClassParams,
   RowHeightParams,
 } from 'ag-grid-community'
-import { renderReport, exportReport, getTemplate } from '@/api/report'
+import { renderReportPaged, exportReport, getTemplate } from '@/api/report'
 import { BaseButton } from '@/components/base'
 import { COL_LETTERS } from '@/stores'
-import type { MergeRegion, CellStyle } from '@/types'
+import type { MergeRegion, CellStyle, DatasetDefinition } from '@/types'
 import { messager } from '@/composables/useMessager'
 import QRCode from 'qrcode'
 import bwipjs from 'bwip-js'
@@ -52,6 +52,7 @@ const loading = ref(true)
 const errorMsg = ref('')
 /** 导出加载状态 */
 const exportLoading = ref(false)
+const paginating = ref(false)
 
 /** 预览页是否展示列头（A/B/C…） */
 const showPreviewColHeader = ref(false)
@@ -84,8 +85,28 @@ const previewGridHost = ref<HTMLElement | null>(null)
 const previewRowHeightsPx = ref<number[]>([])
 /** 无逐行高度时的回退，与模板 gridMeta.defaultRowHeight 一致 */
 const defaultPreviewRowHeightForGrid = ref(25)
+/** 分页是否开启（来自数据集配置） */
+const paginationEnabled = ref(false)
+/** 分页目标数据集 key */
+const paginationDatasetKey = ref('')
+/** 当前页（1-based） */
+const currentPage = ref(1)
+/** 每页条数 */
+const pageSize = ref(20)
+/** 总条数 */
+const totalRows = ref(0)
+/** 导出范围 */
+const exportScope = ref<'current' | 'all'>('current')
 
 const watermarkText = computed(() => dynamicWatermark.value || fixedWatermark.value || '')
+const totalPages = computed(() => {
+  if (!paginationEnabled.value) return 1
+  const total = Math.max(0, Number(totalRows.value) || 0)
+  const size = Math.max(1, Number(pageSize.value) || 20)
+  return Math.max(1, Math.ceil(total / size))
+})
+const canPrevPage = computed(() => paginationEnabled.value && currentPage.value > 1)
+const canNextPage = computed(() => paginationEnabled.value && currentPage.value < totalPages.value)
 
 /** 是否有冻结顶行（有则用 normal 布局并给容器高度，避免 autoHeight + pinned 导致 body 不显示） */
 const hasPinnedRows = computed(() => pinnedTopRowData.value.length > 0)
@@ -276,7 +297,7 @@ async function buildBarcodeDataUrl(text: string): Promise<string> {
 // 初始化：加载模板信息 + 渲染数据
 // ============================================================
 
-onMounted(async () => {
+async function loadPreviewPage() {
   if (!templateId.value) {
     errorMsg.value = '缺少有效的模板 ID'
     loading.value = false
@@ -288,10 +309,7 @@ onMounted(async () => {
     // 若模板未配置 watermarkCallbackUrl，params.watermark 仍可影响动态水印；配置回调后仅服务端可信。
     const runtimeParams = route.query as unknown as Record<string, unknown>
     // 并行请求模板信息和渲染结果，减少等待时间
-    const [templateRes, renderRes] = await Promise.all([
-      getTemplate(templateId.value),
-      renderReport(templateId.value, runtimeParams),
-    ])
+    const templateRes = await getTemplate(templateId.value)
 
     templateName.value = templateRes.data.name || '报表'
 
@@ -305,9 +323,11 @@ onMounted(async () => {
     let colWidthsFromMeta: Record<string, number> = {}
     /** 未单独设置列宽时的默认宽度 */
     let defaultColWidthFromMeta = 100
+    let datasetsFromTemplate: DatasetDefinition[] = []
     if (templateRes.data.content) {
       try {
         const cfg = JSON.parse(templateRes.data.content) as {
+          datasets?: DatasetDefinition[]
           gridMeta?: {
             rowCount?: number
             colCount?: number
@@ -324,6 +344,18 @@ onMounted(async () => {
             edgeMarginTopRow?: boolean
             edgeMarginLeftCol?: boolean
           }
+        }
+        datasetsFromTemplate = Array.isArray(cfg.datasets) ? cfg.datasets : []
+        const pagedDs = datasetsFromTemplate.find((d) => d.pagination?.enabled)
+        if (pagedDs) {
+          paginationEnabled.value = true
+          paginationDatasetKey.value = pagedDs.key
+          if (!paginating.value) {
+            pageSize.value = Math.max(1, Number(pagedDs.pagination?.defaultPageSize) || 20)
+          }
+        } else {
+          paginationEnabled.value = false
+          paginationDatasetKey.value = ''
         }
         const gm = cfg.gridMeta
         if (gm) {
@@ -362,7 +394,37 @@ onMounted(async () => {
       }
     }
 
-    const { cells, styles, merges, colCount: backendColCount, watermark, rowHeightsPx } = renderRes.data
+    const renderRes = await renderReportPaged(
+      templateId.value,
+      runtimeParams,
+      paginationEnabled.value ? currentPage.value : 1,
+      paginationEnabled.value ? pageSize.value : 20,
+      paginationEnabled.value ? paginationDatasetKey.value : undefined,
+    )
+
+    const {
+      cells,
+      styles,
+      merges,
+      colCount: backendColCount,
+      watermark,
+      rowHeightsPx,
+      paginationByDataset,
+    } = renderRes.data
+    if (paginationEnabled.value && paginationDatasetKey.value && paginationByDataset) {
+      const m = paginationByDataset[paginationDatasetKey.value]
+      if (m) {
+        totalRows.value = Number(m.total ?? 0)
+        if (m.currentPage && Number(m.currentPage) > 0) {
+          currentPage.value = Number(m.currentPage)
+        }
+        if (m.pageSize && Number(m.pageSize) > 0) {
+          pageSize.value = Number(m.pageSize)
+        }
+      }
+    } else if (!paginationEnabled.value) {
+      totalRows.value = allRowsCount(cells)
+    }
     mergesSnapshot = merges || []
     dynamicWatermark.value = (watermark || '').trim()
     previewRowHeightsPx.value = Array.isArray(rowHeightsPx) ? rowHeightsPx : []
@@ -564,7 +626,12 @@ onMounted(async () => {
     errorMsg.value = '加载失败：' + (e as Error).message
   } finally {
     loading.value = false
+    paginating.value = false
   }
+}
+
+onMounted(async () => {
+  await loadPreviewPage()
 })
 
 // ============================================================
@@ -576,8 +643,14 @@ async function doExport() {
   try {
     const res = await exportReport({
       templateId: templateId.value,
-      queryParams: {},
+      queryParams: {
+        ...(route.query as unknown as Record<string, unknown>),
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        datasetKey: paginationDatasetKey.value,
+      },
       format: 'xlsx',
+      exportScope: exportScope.value,
     })
     // 从响应中构造下载链接
     const blob = new Blob([res.data], {
@@ -607,8 +680,14 @@ async function doExportPdf() {
   try {
     const res = await exportReport({
       templateId: templateId.value,
-      queryParams: {},
+      queryParams: {
+        ...(route.query as unknown as Record<string, unknown>),
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        datasetKey: paginationDatasetKey.value,
+      },
       format: 'pdf',
+      exportScope: exportScope.value,
     })
     const blob = new Blob([res.data], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
@@ -694,6 +773,34 @@ function inferEffectiveColCount(
   if (fallback > 0) return fallback
   return 1
 }
+
+function allRowsCount(cells: (string | null)[][]): number {
+  return Array.isArray(cells) ? cells.length : 0
+}
+
+async function prevPage() {
+  if (!canPrevPage.value) return
+  currentPage.value -= 1
+  loading.value = true
+  paginating.value = true
+  await loadPreviewPage()
+}
+
+async function nextPage() {
+  if (!canNextPage.value) return
+  currentPage.value += 1
+  loading.value = true
+  paginating.value = true
+  await loadPreviewPage()
+}
+
+async function onPageSizeChange() {
+  if (!paginationEnabled.value) return
+  currentPage.value = 1
+  loading.value = true
+  paginating.value = true
+  await loadPreviewPage()
+}
 </script>
 
 <template>
@@ -705,6 +812,33 @@ function inferEffectiveColCount(
         {{ templateName || '报表预览' }}
       </h1>
       <div class="flex-1" />
+      <div v-if="paginationEnabled" class="flex items-center gap-2 text-[12px] text-gray-700">
+        <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+        <span>共 {{ totalRows }} 条</span>
+        <BaseButton variant="default" size="sm" :disabled="loading || !canPrevPage" @click="prevPage">
+          上一页
+        </BaseButton>
+        <BaseButton variant="default" size="sm" :disabled="loading || !canNextPage" @click="nextPage">
+          下一页
+        </BaseButton>
+        <label class="text-gray-500">每页</label>
+        <select
+          v-model.number="pageSize"
+          class="border border-gray-300 rounded px-1.5 py-0.5 bg-white"
+          :disabled="loading"
+          @change="onPageSizeChange"
+        >
+          <option :value="10">10</option>
+          <option :value="20">20</option>
+          <option :value="50">50</option>
+          <option :value="100">100</option>
+        </select>
+        <label class="text-gray-500">导出</label>
+        <select v-model="exportScope" class="border border-gray-300 rounded px-1.5 py-0.5 bg-white">
+          <option value="current">当前页</option>
+          <option value="all">全部</option>
+        </select>
+      </div>
       <!-- 导出按钮 -->
       <BaseButton
         variant="primary"

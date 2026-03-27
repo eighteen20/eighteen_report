@@ -34,8 +34,27 @@ public class ReportRenderService {
     /**
      * 渲染报表：解析模板 → 查询数据 → 变量替换 → 数据行展开 → 样式传播 → 合并区域调整，返回最终的二维单元格矩阵、样式矩阵和合并区域
      */
-    @SuppressWarnings("unchecked")
     public ReportRenderResponse render(String templateId, Map<String, Object> params) {
+        return render(templateId, params, null, null, null);
+    }
+
+    /**
+     * 渲染报表（支持分页上下文）：当 page/pageSize 非空时，仅对开启分页的数据集查询对应页数据。
+     *
+     * @param templateId 模板 ID
+     * @param params 运行时参数
+     * @param page 当前页（1-based，可空）
+     * @param pageSize 每页条数（可空）
+     * @param datasetKey 分页目标数据集 key（可空）
+     */
+    @SuppressWarnings("unchecked")
+    public ReportRenderResponse render(
+            String templateId,
+            Map<String, Object> params,
+            Integer page,
+            Integer pageSize,
+            String datasetKey
+    ) {
         ReportTemplate t = templateRepository.findById(templateId)
                 .orElseThrow(() -> new IllegalArgumentException("报表模板不存在: " + templateId));
 
@@ -59,13 +78,21 @@ public class ReportRenderService {
         ReportQueryRequest qr = new ReportQueryRequest();
         qr.setTemplateId(templateId);
         qr.setParams(params != null ? params : Collections.emptyMap());
+        qr.setPage(page);
+        qr.setPageSize(pageSize);
+        qr.setDatasetKey(datasetKey);
         ReportQueryResponse queryResp = queryService.query(qr);
         Map<String, ReportQueryResponse.DatasetResult> dsResults = queryResp.getDatasets() != null
                 ? queryResp.getDatasets() : Collections.emptyMap();
+        Map<String, ReportQueryResponse.PaginationMeta> paginationByDataset = new LinkedHashMap<>();
+        for (Map.Entry<String, ReportQueryResponse.DatasetResult> e : dsResults.entrySet()) {
+            if (e.getValue() != null && e.getValue().getPagination() != null) {
+                paginationByDataset.put(e.getKey(), e.getValue().getPagination());
+            }
+        }
 
         // Build template rows (sparse → dense) with styles
         String[][] templateGrid = new String[rowCount][colCount];
-        @SuppressWarnings("unchecked")
         Map<String, String>[][] templateStyles = new Map[rowCount][colCount];
         boolean[] isDataRow = new boolean[rowCount];
         String[] dataRowDsKey = new String[rowCount];
@@ -95,7 +122,6 @@ public class ReportRenderService {
             }
         }
 
-        @SuppressWarnings("unchecked")
         List<Map<String, Object>> templateMerges =
                 (List<Map<String, Object>>) content.getOrDefault("merges", List.of());
 
@@ -233,6 +259,7 @@ public class ReportRenderService {
                 .colCount(finalColCount)
                 .rowHeightsPx(outputRowHeightsPx)
                 .watermark(dynamicWatermark)
+                .paginationByDataset(paginationByDataset)
                 .build();
     }
 
