@@ -9,7 +9,7 @@
 ![AG Grid](https://img.shields.io/badge/AG%20Grid-008CBA?style=flat-square)
 ![EasyExcel](https://img.shields.io/badge/EasyExcel-217346?style=flat-square)
 
-> 目标：在浏览器中完成报表模板设计，并支持渲染预览与 Excel 导出。
+> 目标：在浏览器中完成报表模板设计，并支持渲染预览、Excel/PDF 导出，以及按数据集配置的服务端分页与「导出当前页 / 导出全部」。
 >
 > 开发背景：在我司业务中发现对报表工具的依赖不算重，但现有开源/免费方案往往在冻结表头、移除水印等能力上存在限制，因此使用 `Cursor` 开发并沉淀了该工具(所有代码均由AI 100%生成，也是对AI使用的一次全面尝试)。
 > 
@@ -59,7 +59,8 @@
      - 单元格样式回填
      - 预览页网格线显示由 `gridMeta.renderShowGridLines` 控制
    - 支持双击图片单元格弹出大图预览
-   - 支持 Excel 导出（`.xlsx`）
+   - 支持 Excel 导出（`.xlsx`）与 PDF 导出
+   - 若模板中某数据集启用了分页，预览顶栏可翻页、改每页条数，并可选择导出「当前页」或「全部」
 
 4. **动态水印（服务端回调）**
    - 模板可配置 `gridMeta.watermarkCallbackUrl` 用于动态水印
@@ -73,9 +74,16 @@
      - 网络图片：用户填写 URL，前端将 URL 发送到报表后端，再由后端拉取并回调业务方
    - 预览页根据单元格类型（`type === 'image'`）与 URL 形态渲染 `<img>`；失败时显示占位文本
   
-6. **表格导出和PDF文件导出**
-  - 支持导出两种格式的文件
-  - 图片/二维码/条形码 在导出时会一同渲染
+6. **表格导出和 PDF 导出**
+   - 支持导出 `.xlsx` 与 `.pdf`
+   - 图片 / 二维码 / 条形码在导出时与预览风格一致地渲染
+
+7. **数据集分页（按数据集配置）**
+   - **设计器**：在「数据集」弹窗中为每个数据集单独开启分页，配置默认每页条数、请求参数名（`page` / `pageSize` / `offset` / `limit`）以及 API 返回体的字段路径（如数据列表、总数、当前页、`hasMore` 等，支持点路径）。
+   - **预览**：顶栏在导出按钮左侧显示分页控件（页码、上一页 / 下一页、每页条数）；仅当至少有一个数据集开启分页时出现。
+   - **SQL 数据源**：后端对 SQL 做 count + 分页查询；分页方言抽象在 `service/datasource/sql`，当前实现 MySQL（`LIMIT ? OFFSET ?`），可按库扩展。
+   - **API 数据源**：按配置将分页参数写入 GET query 或 POST JSON body，并按路径解析列表与总数；测试连接时会把「数据列表字段」路径传给后端，便于左侧字段树展示业务列而非仅顶层 `code/message/data`。
+   - **导出范围**：`exportScope` 为 `current` 时导出当前预览页数据；为 `all` 时对该次导出关闭预览分页并在服务端拉取全量（SQL 一次查询；API 在分页开启时会按页循环请求直至无更多数据，带安全页数上限）。详见 `技术文档.md` 第 7.5 节。
 
 ## 项目用法
 
@@ -109,9 +117,9 @@
 3. 访问：
    - `http://localhost:9876`
 
-### 3.1 Docker Compose 部署
+### 3.1 Docker 部署
 
-Docker 相关文件集中在仓库根目录 **`docker/`**。**不在服务器编译**时，在本机执行 **`./docker/build-for-server.sh`**，会本地构建前端并 `bootJar`，生成 **`eighteen-report-server-bundle/`**（及可选 `tar.gz`），只需将该目录上传到服务器并在其中 `docker/` 下执行 `./docker-up.sh`。详见 **`docker/README.md`**。
+Docker 相关文件集中在仓库根目录 **`docker/`**。推荐在本机执行 **`./docker/package-all.sh`** 构建前端、`bootJar` 并把 jar 复制为 **`docker/app.jar`**，将 **`docker/`** 目录（含 `app.jar`）上传到服务器后，按环境变量配置数据库连接并执行 **`./docker/run.sh`** 构建镜像并启动容器。详见 **`docker/README.md`**。
 
 ### 4. 页面路由（前端）
 
@@ -131,8 +139,8 @@ Docker 相关文件集中在仓库根目录 **`docker/`**。**不在服务器编
 - `POST /api/report/template`：创建模板
 - `PUT /api/report/template/{id}`：更新模板
 - `DELETE /api/report/template/{id}`：删除模板
-- `POST /api/report/render`：渲染报表（变量替换 + 行展开）
-- `POST /api/report/export`：导出 Excel（返回字节流）
+- `POST /api/report/render`：渲染报表（变量替换 + 行展开）。请求体为 `templateId`、`params`（运行时命名参数），可选 **`page`**（1-based）、**`pageSize`**、**`datasetKey`**；响应中含 **`paginationByDataset`**。
+- `POST /api/report/export`：导出文件（**`format`**：`xlsx` / `pdf`）。请求体含 `templateId`、**`queryParams`**（建议与预览一致传入 `page` / `pageSize` / `datasetKey` 等业务参数）、可选 **`exportScope`**：`current` | `all`（全量导出时服务端会关闭预览分页并对 API 数据源按需逐页拉齐）。
 - `GET /api/datasource/list`：数据源列表
 - `POST /api/datasource/test`：测试数据集连接
 
@@ -144,10 +152,10 @@ Docker 相关文件集中在仓库根目录 **`docker/`**。**不在服务器编
 - 接口基础路径：`/api/demo/user`
 
 1. **分页查询演示用户**
-   - `GET /api/demo/user/list?page=0&size=10`
-   - 用途：作为报表数据集测试接口，验证基础查询与分页。
+   - `GET /api/demo/user/list?page=1&size=20`（`page` 为 **1-based**，`size` 默认 20）
+   - 用途：作为 **API 数据集分页** 联调样例；响应为 `code/message/data`，其中 `data` 内含 `records`、`total`、`currentPage`、`pageSize`、`hasMore`，可与数据集弹窗中的响应路径映射一一对应。
    - 示例：
-     - 浏览器直接访问：`http://localhost:9876/api/demo/user/list?page=0&size=10`
+     - `http://localhost:9876/api/demo/user/list?page=1&size=20`
 
 2. **动态水印测试**
    - `GET /api/demo/user/watermark`
@@ -178,7 +186,7 @@ Docker 相关文件集中在仓库根目录 **`docker/`**。**不在服务器编
 
 模板的 `content` 保存为 JSON 字符串，核心字段包括：
 
-- `datasets`：数据集列表（字段、数据源 ID、SQL 等）
+- `datasets`：数据集列表（字段、数据源 ID、SQL / API、以及可选的 **`pagination`** 配置）
 - `cells`：单元格矩阵（例如 `A1`、`B2` 这种引用，包含 `value/style/type` 等）
 - `merges`：合并区域列表（`row/col/rowSpan/colSpan`）
 - `gridMeta`：网格元数据（行列数、冻结行、列宽、留白/水印/网格线等渲染控制项）
