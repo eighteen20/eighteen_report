@@ -224,6 +224,19 @@ function onPreviewResize() {
   syncPreviewHorizontalScroll()
 }
 
+function buildRuntimeParamsFromRouteQuery(): Record<string, unknown> {
+  const params: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(route.query)) {
+    if (value == null) continue
+    if (Array.isArray(value)) {
+      params[key] = value.length <= 1 ? (value[0] ?? '') : value.filter((item) => item != null)
+      continue
+    }
+    params[key] = value
+  }
+  return params
+}
+
 function onGridReady(params: { api: GridApi }) {
   gridApi.value = params.api
   syncPreviewHorizontalScroll()
@@ -307,7 +320,7 @@ async function loadPreviewPage() {
   try {
     // 运行时参数：透传 URL query 到渲染接口（数据集变量、业务筛选等）。
     // 若模板未配置 watermarkCallbackUrl，params.watermark 仍可影响动态水印；配置回调后仅服务端可信。
-    const runtimeParams = route.query as unknown as Record<string, unknown>
+    const runtimeParams = buildRuntimeParamsFromRouteQuery()
     // 并行请求模板信息和渲染结果，减少等待时间
     const templateRes = await getTemplate(templateId.value)
 
@@ -643,12 +656,10 @@ async function doExport() {
   try {
     const res = await exportReport({
       templateId: templateId.value,
-      queryParams: {
-        ...(route.query as unknown as Record<string, unknown>),
-        page: currentPage.value,
-        pageSize: pageSize.value,
-        datasetKey: paginationDatasetKey.value,
-      },
+      queryParams: buildRuntimeParamsFromRouteQuery(),
+      page: currentPage.value,
+      pageSize: pageSize.value,
+      datasetKey: paginationDatasetKey.value,
       format: 'xlsx',
       exportScope: exportScope.value,
     })
@@ -680,12 +691,10 @@ async function doExportPdf() {
   try {
     const res = await exportReport({
       templateId: templateId.value,
-      queryParams: {
-        ...(route.query as unknown as Record<string, unknown>),
-        page: currentPage.value,
-        pageSize: pageSize.value,
-        datasetKey: paginationDatasetKey.value,
-      },
+      queryParams: buildRuntimeParamsFromRouteQuery(),
+      page: currentPage.value,
+      pageSize: pageSize.value,
+      datasetKey: paginationDatasetKey.value,
       format: 'pdf',
       exportScope: exportScope.value,
     })

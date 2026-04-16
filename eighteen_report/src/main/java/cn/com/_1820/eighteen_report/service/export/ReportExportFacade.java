@@ -45,11 +45,11 @@ public class ReportExportFacade {
         Map<String, Object> queryParams = request.getQueryParams() != null ? request.getQueryParams() : Collections.emptyMap();
 
         boolean exportAll = "all".equalsIgnoreCase(request.getExportScope());
-        Integer page = exportAll ? null : readInt(queryParams.get("page"));
-        Integer pageSize = exportAll ? null : readInt(queryParams.get("pageSize"));
+        Integer page = exportAll ? null : request.getPage();
+        Integer pageSize = exportAll ? null : request.getPageSize();
         // 导出全部时显式传入一个不匹配任何数据集 key 的标记，
         // 让查询层 shouldPaginateDataset(...) 返回 false，从而关闭分页。
-        String datasetKey = exportAll ? "__EXPORT_ALL_NO_PAGINATION__" : readString(queryParams.get("datasetKey"));
+        String datasetKey = exportAll ? "__EXPORT_ALL_NO_PAGINATION__" : request.getDatasetKey();
         ReportRenderResponse rendered = renderService.render(templateId, queryParams, page, pageSize, datasetKey);
 
         Map<String, Object> templateContent = readTemplateContent(templateId);
@@ -59,22 +59,6 @@ public class ReportExportFacade {
         ExportContext ctx = new ExportContext(templateId, queryParams, rendered, templateContent, callbackProperties);
 
         return exporter.export(ctx);
-    }
-
-    private Integer readInt(Object value) {
-        if (value instanceof Number n) return n.intValue();
-        if (value == null) return null;
-        try {
-            return Integer.parseInt(String.valueOf(value));
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private String readString(Object value) {
-        if (value == null) return null;
-        String s = String.valueOf(value).trim();
-        return s.isEmpty() ? null : s;
     }
 
     /**
@@ -97,4 +81,3 @@ public class ReportExportFacade {
         }
     }
 }
-

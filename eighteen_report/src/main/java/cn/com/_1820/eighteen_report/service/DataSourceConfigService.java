@@ -21,6 +21,8 @@ import java.net.http.HttpResponse;
 import java.sql.*;
 import java.time.Duration;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 数据源配置服务：管理 JDBC/API 类型的数据源，提供 SQL 执行和 API 调用能力。支持命名参数(:paramName)的 SQL 查询和 RESTful API 数据获取。
@@ -29,6 +31,8 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class DataSourceConfigService {
+    private static final Pattern TEMPLATE_PARAM_PATTERN = Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)}");
+    private static final Pattern OPTIONAL_SQL_BLOCK_PATTERN = Pattern.compile("\\[\\[(.*?)]\\]", Pattern.DOTALL);
 
     /** 测试查询时的最大预览行数 */
     private static final int PREVIEW_ROW_LIMIT = 20;
@@ -156,10 +160,12 @@ public class DataSourceConfigService {
      */
     private DataSourceTestResponse doExecuteSql(DataSourceConfig config, String sql,
                                                  Map<String, Object> params, int rowLimit) {
-        validateSql(sql);
         Map<String, Object> safeParams = params != null ? params : Collections.emptyMap();
+        String resolvedSql = substituteSqlTemplate(sql, safeParams);
+        validateSql(resolvedSql);
 
-        SqlParseResult parsed = parseNamedParams(sql, safeParams);
+        SqlParseResult parsed = parseNamedParams(resolvedSql, safeParams);
+        log.info("执行报表 SQL: {}", buildSqlLog(parsed.sql(), parsed.values()));
 
         try (Connection conn = DriverManager.getConnection(config.getUrl(), config.getUsername(), config.getPassword());
              PreparedStatement ps = conn.prepareStatement(parsed.sql())) {
@@ -231,8 +237,9 @@ public class DataSourceConfigService {
      * 执行 API 调用，供 ReportQueryService 复用。
      */
     public DataSourceTestResponse executeApi(String apiUrl, String apiMethod,
-                                              Map<String, String> apiHeaders, String apiBody) {
-        return doExecuteApi(apiUrl, apiMethod, apiHeaders, apiBody, 0);
+                                              Map<String, String> apiHeaders, String apiBody,
+                                              Map<String, Object> runtimeParams) {
+        return doExecuteApi(apiUrl, apiMethod, apiHeaders, apiBody, 0, runtimeParams);
     }
 
     /**
@@ -244,16 +251,19 @@ public class DataSourceConfigService {
             Map<String, String> apiHeaders,
             String apiBody,
             PageRequest pageRequest,
-            ApiPageMapping mapping
+            ApiPageMapping mapping,
+            Map<String, Object> runtimeParams
     ) {
         try {
             String httpMethod = apiMethod != null ? apiMethod.toUpperCase(Locale.ROOT) : "GET";
             ObjectMapper om = new ObjectMapper();
+            Map<String, Object> safeRuntimeParams = normalizeRuntimeParams(runtimeParams);
 
             Map<String, Object> requestParams = buildPageRequestParams(pageRequest, mapping);
 
-            String finalUrl = apiUrl;
-            String finalBody = apiBody;
+            String finalUrl = appendQueryParams(apiUrl, safeRuntimeParams);
+            String finalBody = substituteTemplate(apiBody, safeRuntimeParams);
+            Map<String, String> finalHeaders = substituteTemplateMap(apiHeaders, safeRuntimeParams);
             if (!requestParams.isEmpty()) {
                 if ("POST".equals(httpMethod)) {
                     finalBody = mergeJsonBody(finalBody, requestParams, om);
@@ -265,8 +275,8 @@ public class DataSourceConfigService {
             HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(URI.create(finalUrl))
                     .timeout(Duration.ofSeconds(QUERY_TIMEOUT_SECONDS));
-            if (apiHeaders != null) {
-                apiHeaders.forEach(builder::header);
+            if (finalHeaders != null) {
+                finalHeaders.forEach(builder::header);
             }
             if ("POST".equals(httpMethod)) {
                 String bodyStr = finalBody != null ? finalBody : "{}";
@@ -292,32 +302,43 @@ public class DataSourceConfigService {
                 request.getApiHeaders(),
                 request.getApiBody(),
                 PREVIEW_ROW_LIMIT,
-                request.getApiRecordsPath()
+                request.getApiRecordsPath(),
+                request.getParams()
         );
     }
 
     private DataSourceTestResponse doExecuteApi(String url, String method,
                                                  Map<String, String> headers, String body,
-                                                 int rowLimit) {
-        return doExecuteApi(url, method, headers, body, rowLimit, null);
+                                                 int rowLimit,
+                                                 Map<String, Object> runtimeParams) {
+        return doExecuteApi(url, method, headers, body, rowLimit, null, runtimeParams);
     }
 
     private DataSourceTestResponse doExecuteApi(String url, String method,
                                                  Map<String, String> headers, String body,
                                                  int rowLimit, String recordsPath) {
+        return doExecuteApi(url, method, headers, body, rowLimit, recordsPath, Collections.emptyMap());
+    }
+
+    private DataSourceTestResponse doExecuteApi(String url, String method,
+                                                 Map<String, String> headers, String body,
+                                                 int rowLimit, String recordsPath,
+                                                 Map<String, Object> runtimeParams) {
         try {
             String httpMethod = method != null ? method.toUpperCase(Locale.ROOT) : "GET";
+            Map<String, Object> safeRuntimeParams = normalizeRuntimeParams(runtimeParams);
 
             HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+                    .uri(URI.create(appendQueryParams(url, safeRuntimeParams)))
                     .timeout(Duration.ofSeconds(QUERY_TIMEOUT_SECONDS));
 
-            if (headers != null) {
-                headers.forEach(builder::header);
+            Map<String, String> resolvedHeaders = substituteTemplateMap(headers, safeRuntimeParams);
+            if (resolvedHeaders != null) {
+                resolvedHeaders.forEach(builder::header);
             }
 
             if ("POST".equals(httpMethod) && body != null) {
-                builder.POST(HttpRequest.BodyPublishers.ofString(body));
+                builder.POST(HttpRequest.BodyPublishers.ofString(substituteTemplate(body, safeRuntimeParams)));
                 builder.header("Content-Type", "application/json");
             } else {
                 builder.GET();
@@ -421,17 +442,19 @@ public class DataSourceConfigService {
             Map<String, Object> params,
             PageRequest pageRequest
     ) {
-        validateSql(sql);
         Map<String, Object> safeParams = params != null ? params : Collections.emptyMap();
         PageRequest safePage = pageRequest != null ? pageRequest : new PageRequest(1, 20);
+        String resolvedSql = substituteSqlTemplate(sql, safeParams);
+        validateSql(resolvedSql);
 
-        SqlParseResult parsed = parseNamedParams(sql, safeParams);
+        SqlParseResult parsed = parseNamedParams(resolvedSql, safeParams);
         SqlPaginationDialect dialect = dialectResolver.resolve(config);
 
         long total = 0L;
         try (Connection conn = DriverManager.getConnection(config.getUrl(), config.getUsername(), config.getPassword())) {
             // 统计总数
             String countSql = dialect.toCountSql(parsed.sql());
+            log.info("执行报表 SQL(count): {}", buildSqlLog(countSql, parsed.values()));
             try (PreparedStatement cps = conn.prepareStatement(countSql)) {
                 cps.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
                 for (int i = 0; i < parsed.values().size(); i++) {
@@ -449,6 +472,10 @@ public class DataSourceConfigService {
             int page = Math.max(1, safePage.page());
             int pageSize = Math.max(1, safePage.pageSize());
             int offset = (page - 1) * pageSize;
+            List<Object> pageSqlValues = new ArrayList<>(parsed.values());
+            pageSqlValues.add(pageSize);
+            pageSqlValues.add(offset);
+            log.info("执行报表 SQL(page): {}", buildSqlLog(pageSql, pageSqlValues));
 
             try (PreparedStatement ps = conn.prepareStatement(pageSql)) {
                 ps.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
@@ -651,13 +678,190 @@ public class DataSourceConfigService {
         sb.append(url.contains("?") ? "&" : "?");
         boolean first = true;
         for (Map.Entry<String, Object> e : params.entrySet()) {
+            if (e.getValue() == null) continue;
+            if (e.getValue() instanceof Iterable<?> items) {
+                for (Object item : items) {
+                    if (!first) sb.append('&');
+                    first = false;
+                    appendQueryParam(sb, e.getKey(), item);
+                }
+                continue;
+            }
+            if (e.getValue().getClass().isArray()) {
+                int len = java.lang.reflect.Array.getLength(e.getValue());
+                for (int i = 0; i < len; i++) {
+                    if (!first) sb.append('&');
+                    first = false;
+                    appendQueryParam(sb, e.getKey(), java.lang.reflect.Array.get(e.getValue(), i));
+                }
+                continue;
+            }
             if (!first) sb.append('&');
             first = false;
-            sb.append(java.net.URLEncoder.encode(e.getKey(), java.nio.charset.StandardCharsets.UTF_8));
-            sb.append('=');
-            sb.append(java.net.URLEncoder.encode(String.valueOf(e.getValue()), java.nio.charset.StandardCharsets.UTF_8));
+            appendQueryParam(sb, e.getKey(), e.getValue());
+        }
+        if (first && sb.length() > 0) {
+            return url;
         }
         return sb.toString();
+    }
+
+    private void appendQueryParam(StringBuilder sb, String key, Object value) {
+        sb.append(java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8));
+        sb.append('=');
+        sb.append(java.net.URLEncoder.encode(String.valueOf(value), java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private Map<String, Object> normalizeRuntimeParams(Map<String, Object> params) {
+        if (params == null || params.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        params.forEach((key, value) -> {
+            if (key == null || key.isBlank() || value == null) {
+                return;
+            }
+            normalized.put(key, value);
+        });
+        return normalized;
+    }
+
+    private String substituteSqlTemplate(String sql, Map<String, Object> params) {
+        if (sql == null || sql.isEmpty()) {
+            return sql;
+        }
+        Map<String, Object> safeParams = params != null ? params : Collections.emptyMap();
+        String withOptionalBlocks = applyOptionalSqlBlocks(sql, safeParams);
+        return substituteTemplate(withOptionalBlocks, safeParams, true);
+    }
+
+    private String substituteTemplate(String input, Map<String, Object> params) {
+        return substituteTemplate(input, params, false);
+    }
+
+    private String substituteTemplate(String input, Map<String, Object> params, boolean sqlMode) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        Map<String, Object> safeParams = params != null ? params : Collections.emptyMap();
+        Matcher matcher = TEMPLATE_PARAM_PATTERN.matcher(input);
+        StringBuffer sb = new StringBuffer();
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            Object value = safeParams.get(name);
+            String replacement = sqlMode ? stringifySqlTemplateValue(value) : stringifyTemplateValue(value);
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
+    }
+
+    private Map<String, String> substituteTemplateMap(Map<String, String> source, Map<String, Object> params) {
+        if (source == null || source.isEmpty()) {
+            return source;
+        }
+        Map<String, String> resolved = new LinkedHashMap<>();
+        source.forEach((key, value) -> resolved.put(key, substituteTemplate(value, params)));
+        return resolved;
+    }
+
+    private String stringifyTemplateValue(Object value) {
+        if (value == null) return "";
+        if (value instanceof Iterable<?> items) {
+            List<String> parts = new ArrayList<>();
+            for (Object item : items) {
+                parts.add(item == null ? "" : String.valueOf(item));
+            }
+            return String.join(",", parts);
+        }
+        if (value.getClass().isArray()) {
+            int len = java.lang.reflect.Array.getLength(value);
+            List<String> parts = new ArrayList<>(len);
+            for (int i = 0; i < len; i++) {
+                Object item = java.lang.reflect.Array.get(value, i);
+                parts.add(item == null ? "" : String.valueOf(item));
+            }
+            return String.join(",", parts);
+        }
+        return String.valueOf(value);
+    }
+
+    private String stringifySqlTemplateValue(Object value) {
+        String raw = stringifyTemplateValue(value);
+        return raw.replace("'", "''");
+    }
+
+    /**
+     * 处理可选 SQL 片段：
+     * [[ and name = '${name}' ]]
+     * 当 name 缺失/空白时整段移除；存在时保留并继续做 ${name} 替换。
+     */
+    private String applyOptionalSqlBlocks(String sql, Map<String, Object> params) {
+        Matcher matcher = OPTIONAL_SQL_BLOCK_PATTERN.matcher(sql);
+        StringBuffer sb = new StringBuffer();
+        while (matcher.find()) {
+            String block = matcher.group(1);
+            String replacement = shouldKeepOptionalSqlBlock(block, params) ? block : "";
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
+    }
+
+    private boolean shouldKeepOptionalSqlBlock(String block, Map<String, Object> params) {
+        Matcher matcher = TEMPLATE_PARAM_PATTERN.matcher(block);
+        boolean hasTemplateParam = false;
+        while (matcher.find()) {
+            hasTemplateParam = true;
+            String name = matcher.group(1);
+            if (isBlankRuntimeParam(params.get(name))) {
+                return false;
+            }
+        }
+        return hasTemplateParam;
+    }
+
+    private boolean isBlankRuntimeParam(Object value) {
+        if (value == null) {
+            return true;
+        }
+        if (value instanceof CharSequence seq) {
+            return seq.toString().trim().isEmpty();
+        }
+        if (value instanceof Iterable<?> items) {
+            return !items.iterator().hasNext();
+        }
+        if (value.getClass().isArray()) {
+            return java.lang.reflect.Array.getLength(value) == 0;
+        }
+        return false;
+    }
+
+    private String buildSqlLog(String sql, List<Object> values) {
+        if (sql == null || sql.isEmpty() || values == null || values.isEmpty()) {
+            return sql;
+        }
+        StringBuilder sb = new StringBuilder(sql.length() + values.size() * 8);
+        int valueIndex = 0;
+        for (int i = 0; i < sql.length(); i++) {
+            char ch = sql.charAt(i);
+            if (ch == '?' && valueIndex < values.size()) {
+                sb.append(formatSqlLiteral(values.get(valueIndex++)));
+            } else {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+    private String formatSqlLiteral(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof Number || value instanceof Boolean) {
+            return String.valueOf(value);
+        }
+        return "'" + String.valueOf(value).replace("'", "''") + "'";
     }
 
     /**

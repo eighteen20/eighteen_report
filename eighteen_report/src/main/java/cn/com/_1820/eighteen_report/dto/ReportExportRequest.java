@@ -12,6 +12,12 @@ public class ReportExportRequest {
 
     private String templateId;
     private Map<String, Object> queryParams;
+    /** 当前页（1-based） */
+    private Integer page;
+    /** 每页条数 */
+    private Integer pageSize;
+    /** 分页目标数据集 key */
+    private String datasetKey;
     /** xlsx | pdf */
     private String format;
     /** 导出范围：current（当前页）| all（全部） */

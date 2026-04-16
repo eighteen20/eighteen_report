@@ -186,7 +186,9 @@ public class WatermarkCallbackService {
                 b.queryParam(key, val);
             }
         }
-        return b.build(true).toUri();
+        return b.build()
+                .encode(StandardCharsets.UTF_8)
+                .toUri();
     }
 
     private Optional<String> parseBody(String body, String contentType) {

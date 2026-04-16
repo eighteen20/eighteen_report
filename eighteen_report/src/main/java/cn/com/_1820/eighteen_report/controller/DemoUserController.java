@@ -67,16 +67,22 @@ public class DemoUserController {
      *
      * @param page 页码（1-based，默认 1）
      * @param size 每页大小（默认 20）
+     * @param name 姓名模糊查询条件（可选）
      */
     @GetMapping("/list")
     public ResponseEntity<Map<String, Object>> list(
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String name) {
         int safePage = Math.max(1, page);
         int safeSize = Math.max(1, size);
         int pageIndex = safePage - 1;
+        String safeName = name != null ? name.trim() : "";
 
-        var result = repository.findAll(PageRequest.of(pageIndex, safeSize));
+        var pageable = PageRequest.of(pageIndex, safeSize);
+        var result = safeName.isEmpty()
+                ? repository.findAll(pageable)
+                : repository.findByNameContainingIgnoreCase(safeName, pageable);
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("records", result.getContent());

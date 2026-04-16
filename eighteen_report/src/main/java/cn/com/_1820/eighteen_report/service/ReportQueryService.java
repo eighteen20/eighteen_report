@@ -76,12 +76,14 @@ public class ReportQueryService {
             String dataSourceId = (String) ds.get("dataSourceId");
             String sql = (String) ds.get("sql");
 
-            Map<String, Object> mergedParams = new HashMap<>();
+            Map<String, Object> mergedParams = new HashMap<>(runtimeParams);
             List<Map<String, Object>> paramDefs = (List<Map<String, Object>>) ds.getOrDefault("params", List.of());
             for (Map<String, Object> p : paramDefs) {
                 String name = (String) p.get("name");
                 Object defaultVal = p.get("defaultValue");
-                mergedParams.put(name, runtimeParams.getOrDefault(name, defaultVal));
+                if (!mergedParams.containsKey(name)) {
+                    mergedParams.put(name, defaultVal);
+                }
             }
 
             if (shouldPaginate) {
@@ -129,7 +131,8 @@ public class ReportQueryService {
                                 paginationConfig.currentPagePath(),
                                 paginationConfig.responsePageSizePath(),
                                 paginationConfig.hasMorePath()
-                        )
+                        ),
+                        runtimeParams
                 );
                 return ReportQueryResponse.DatasetResult.builder()
                         .columns(resp.fields())
@@ -137,9 +140,15 @@ public class ReportQueryService {
                         .pagination(resp.pagination())
                         .build();
             } else if (exportAllMode && paginationConfig.enabled()) {
-                return queryAllApiPages(apiUrl, apiMethod, apiHeaders, apiBody, paginationConfig, pageSize);
+                return queryAllApiPages(apiUrl, apiMethod, apiHeaders, apiBody, paginationConfig, pageSize, runtimeParams);
             } else {
-                DataSourceTestResponse resp = dataSourceConfigService.executeApi(apiUrl, apiMethod, apiHeaders, apiBody);
+                DataSourceTestResponse resp = dataSourceConfigService.executeApi(
+                        apiUrl,
+                        apiMethod,
+                        apiHeaders,
+                        apiBody,
+                        runtimeParams
+                );
                 return ReportQueryResponse.DatasetResult.builder()
                         .columns(resp.getFields())
                         .rows(resp.getPreviewRows())
@@ -159,7 +168,8 @@ public class ReportQueryService {
             Map<String, String> apiHeaders,
             String apiBody,
             PaginationConfig cfg,
-            int requestedPageSize
+            int requestedPageSize,
+            Map<String, Object> runtimeParams
     ) {
         int pageSize = Math.max(1, requestedPageSize > 0 ? requestedPageSize : cfg.defaultPageSize());
         int page = 1;
@@ -185,7 +195,8 @@ public class ReportQueryService {
                             cfg.currentPagePath(),
                             cfg.responsePageSizePath(),
                             cfg.hasMorePath()
-                    )
+                    ),
+                    runtimeParams
             );
 
             if (columns.isEmpty()) {

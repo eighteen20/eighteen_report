@@ -259,6 +259,9 @@ export interface DatasetPageMeta {
 export interface ReportExportRequest {
   templateId: string
   queryParams?: Record<string, unknown>
+  page?: number
+  pageSize?: number
+  datasetKey?: string
   format?: 'xlsx' | 'pdf'
   /** 导出范围：当前页 / 全部 */
   exportScope?: 'current' | 'all'

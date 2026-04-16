@@ -46,3 +46,4 @@ logs/
 /docker/app.jar
 
 /eighteen_report/src/main/resources/static/**
+/.aiassistant/
