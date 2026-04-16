@@ -885,42 +885,46 @@ async function onPageSizeChange() {
           :style="watermarkStyle"
         />
 
-        <!-- 内容对齐容器：按列总宽度设置固定宽度，支持左/中/右对齐；有冻结行时占满高度 -->
-        <div
-          ref="previewGridHost"
-          class="relative z-0 w-full min-h-0"
-          :class="[
-            previewContentAlign === 'center' ? 'mx-auto' : previewContentAlign === 'right' ? 'ml-auto' : '',
-            hasPinnedRows ? 'h-full' : '',
-          ]"
-          :style="[previewContentWidth ? { width: previewContentWidth + 'px' } : {}]"
-        >
-          <AgGridVue
-            class="ag-theme-alpine w-full er-preview-readonly"
-            :class="{
-              'er-preview-no-col-header': !showPreviewColHeader,
-              'er-preview-grid-with-pinned': hasPinnedRows,
-              'er-grid-lines': previewRenderShowGridLines,
-              'er-grid-no-lines': !previewRenderShowGridLines,
-            }"
-            :columnDefs="columnDefs"
-            :rowData="rowData"
-            :pinnedTopRowData="pinnedTopRowData"
-            :defaultColDef="{ resizable: true, sortable: true }"
-            :suppressRowTransform="true"
-            :getRowHeight="previewGetRowHeight"
-            :suppressHorizontalScroll="previewSuppressHorizontalScroll"
-            :headerHeight="showPreviewColHeader ? undefined : 0"
-            :domLayout="
-              hasPinnedRows
-                ? undefined
-                : rowData.length < 30 && previewRowHeightsPx.length === 0
-                  ? 'autoHeight'
-                  : undefined
-            "
-            @grid-ready="onGridReady"
-            @first-data-rendered="onFirstDataRendered"
-          />
+        <div class="max-w-full overflow-x-auto overflow-y-hidden" :class="[hasPinnedRows ? 'h-full' : '']">
+          <div class="min-w-full min-h-full h-full">
+            <!-- 内容对齐容器：按列总宽度设置固定宽度，支持左/中/右对齐；有冻结行时占满高度 -->
+            <div
+              ref="previewGridHost"
+              class="relative z-0 w-full min-h-0"
+              :class="[
+                previewContentAlign === 'center' ? 'mx-auto' : previewContentAlign === 'right' ? 'ml-auto' : '',
+                hasPinnedRows ? 'h-full' : '',
+              ]"
+              :style="[previewContentWidth ? { width: previewContentWidth + 'px' } : {}]"
+            >
+              <AgGridVue
+                class="ag-theme-alpine w-full er-preview-readonly"
+                :class="{
+                  'er-preview-no-col-header': !showPreviewColHeader,
+                  'er-preview-grid-with-pinned': hasPinnedRows,
+                  'er-grid-lines': previewRenderShowGridLines,
+                  'er-grid-no-lines': !previewRenderShowGridLines,
+                }"
+                :columnDefs="columnDefs"
+                :rowData="rowData"
+                :pinnedTopRowData="pinnedTopRowData"
+                :defaultColDef="{ resizable: true, sortable: true }"
+                :suppressRowTransform="true"
+                :getRowHeight="previewGetRowHeight"
+                :suppressHorizontalScroll="previewSuppressHorizontalScroll"
+                :headerHeight="showPreviewColHeader ? undefined : 0"
+                :domLayout="
+                  hasPinnedRows
+                    ? undefined
+                    : rowData.length < 30 && previewRowHeightsPx.length === 0
+                      ? 'autoHeight'
+                      : undefined
+                "
+                @grid-ready="onGridReady"
+                @first-data-rendered="onFirstDataRendered"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </main>
